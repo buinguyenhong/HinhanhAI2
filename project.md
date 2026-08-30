@@ -35,4 +35,4 @@ AI Image Studio là một công cụ chỉnh sửa hình ảnh đơn lẻ chất
 
 ### 2.5. Bảo mật & Xác thực (Đăng nhập)
 - **Màn hình đăng nhập (Login):** Ứng dụng được bảo vệ bởi một lớp đăng nhập cơ bản trước khi truy cập vào không gian làm việc.
-- **Biến môi trường Vercel:** Mật khẩu đăng nhập được quản lý thông qua biến môi trường (`VITE_APP_PASSWORD`). Khi deploy lên Vercel, người dùng chỉ cần thiết lập biến môi trường này để thay đổi mật khẩu truy cập. Cấu hình xác thực Google OAuth sẽ được dời lại và thiết lập sau khi dự án chạy production.
+- **Biến môi trường Vercel:** Mật khẩu và session secret được quản lý server-side qua `APP_PASSWORD` và `SESSION_SECRET`; không dùng biến `VITE_` cho secret. Cấu hình Google OAuth được triển khai sau khi có client credentials production.
