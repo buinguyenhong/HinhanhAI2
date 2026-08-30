@@ -1,0 +1,8 @@
+{
+  "name": "HinhanhAI — Creative Image Workspace",
+  "description": "Professional Creative Image Workspace with AI prompt refinement, ControlNet structure preservation, and Google Drive workflow.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
