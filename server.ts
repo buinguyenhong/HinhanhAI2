@@ -1,4 +1,4 @@
-import express, { Request, Response, NextFunction } from 'express';
+﻿import express, { Request, Response, NextFunction } from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
@@ -47,7 +47,7 @@ const apiLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: {
-    error: 'Bạn đã gửi quá nhiều yêu cầu đến hệ thống. Vui lòng thử lại sau ít phút.',
+    error: 'Báº¡n Ä‘Ã£ gá»­i quÃ¡ nhiá»u yÃªu cáº§u Ä‘áº¿n há»‡ thá»‘ng. Vui lÃ²ng thá»­ láº¡i sau Ã­t phÃºt.',
   },
 });
 
@@ -58,7 +58,7 @@ const aiLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: {
-    error: 'Bạn đã đạt giới hạn yêu cầu AI (tối đa 20 yêu cầu / 15 phút). Vui lòng thử lại sau.',
+    error: 'Báº¡n Ä‘Ã£ Ä‘áº¡t giá»›i háº¡n yÃªu cáº§u AI (tá»‘i Ä‘a 20 yÃªu cáº§u / 15 phÃºt). Vui lÃ²ng thá»­ láº¡i sau.',
   },
 });
 
@@ -69,7 +69,7 @@ const loginLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: {
-    error: 'Đã thử đăng nhập quá nhiều lần. Vui lòng đợi 15 phút trước khi thử lại.',
+    error: 'ÄÃ£ thá»­ Ä‘Äƒng nháº­p quÃ¡ nhiá»u láº§n. Vui lÃ²ng Ä‘á»£i 15 phÃºt trÆ°á»›c khi thá»­ láº¡i.',
   },
 });
 
@@ -97,7 +97,7 @@ function requireAuth(req: AuthenticatedRequest, res: Response, next: NextFunctio
 
   if (!token) {
     return res.status(401).json({
-      error: 'Yêu cầu xác thực. Vui lòng đăng nhập để tiếp tục.',
+      error: 'YÃªu cáº§u xÃ¡c thá»±c. Vui lÃ²ng Ä‘Äƒng nháº­p Ä‘á»ƒ tiáº¿p tá»¥c.',
       code: 'UNAUTHORIZED',
     });
   }
@@ -108,7 +108,7 @@ function requireAuth(req: AuthenticatedRequest, res: Response, next: NextFunctio
     next();
   } catch (err: any) {
     return res.status(401).json({
-      error: 'Mã xác thực đã hết hạn hoặc không hợp lệ. Vui lòng đăng nhập lại.',
+      error: 'MÃ£ xÃ¡c thá»±c Ä‘Ã£ háº¿t háº¡n hoáº·c khÃ´ng há»£p lá»‡. Vui lÃ²ng Ä‘Äƒng nháº­p láº¡i.',
       code: 'INVALID_TOKEN',
     });
   }
@@ -123,7 +123,7 @@ app.get('/api/health', (req, res) => {
 
 // 2. Login validation schema
 const loginSchema = z.object({
-  password: z.string().min(1, 'Mật khẩu không được để trống').max(200, 'Mật khẩu quá dài'),
+  password: z.string().min(1, 'Máº­t kháº©u khÃ´ng Ä‘Æ°á»£c Ä‘á»ƒ trá»‘ng').max(200, 'Máº­t kháº©u quÃ¡ dÃ i'),
 });
 
 // POST /api/login (Public with loginLimiter)
@@ -131,7 +131,7 @@ app.post('/api/login', loginLimiter, (req, res) => {
   const parsed = loginSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({
-      error: 'Dữ liệu không hợp lệ',
+      error: 'Dá»¯ liá»‡u khÃ´ng há»£p lá»‡',
       details: parsed.error.issues.map((i) => i.message).join(', '),
     });
   }
@@ -141,7 +141,7 @@ app.post('/api/login', loginLimiter, (req, res) => {
   // Constant-time like comparison or direct string equality check
   if (password !== APP_PASSWORD) {
     return res.status(401).json({
-      error: 'Mã truy cập không hợp lệ. Vui lòng kiểm tra lại.',
+      error: 'MÃ£ truy cáº­p khÃ´ng há»£p lá»‡. Vui lÃ²ng kiá»ƒm tra láº¡i.',
     });
   }
 
@@ -205,21 +205,126 @@ function getGeminiClient(): GoogleGenAI | null {
 // --- ZOD INPUT VALIDATION SCHEMAS ---
 
 const analyzeStyleSchema = z.object({
-  imageBase64: z.string().min(1, 'Ảnh phân tích không được để trống'),
+  imageBase64: z.string().min(1, 'áº¢nh phÃ¢n tÃ­ch khÃ´ng Ä‘Æ°á»£c Ä‘á»ƒ trá»‘ng'),
   mimeType: z.string().max(100).optional().default('image/jpeg'),
   userFocus: z.string().max(2000).optional().nullable(),
 });
 
+const ANALYSIS_RESPONSE_SCHEMA = {
+  type: Type.OBJECT,
+  properties: {
+    styleName: { type: Type.STRING, description: 'TÃªn phong cÃ¡ch' },
+    genre: { type: Type.STRING, description: 'Thá»ƒ loáº¡i nghá»‡ thuáº­t' },
+    styleDescription: { type: Type.STRING, description: 'MÃ´ táº£ chi tiáº¿t phong cÃ¡ch' },
+    lighting: {
+      type: Type.OBJECT,
+      properties: {
+        sourceType: { type: Type.STRING, description: 'Nguá»“n sÃ¡ng' },
+        direction: { type: Type.STRING, description: 'HÆ°á»›ng sÃ¡ng' },
+        colorTemperature: { type: Type.STRING, description: 'Nhiá»‡t Ä‘á»™ mÃ u' },
+        quality: { type: Type.STRING, description: 'Äá»™ má»m/gáº¯t' },
+        detailedAnalysis: { type: Type.STRING, description: 'PhÃ¢n tÃ­ch chi tiáº¿t Ã¡nh sÃ¡ng vÃ  bÃ³ng Ä‘á»•' },
+        promptSnippetEn: { type: Type.STRING, description: 'Äoáº¡n prompt tiáº¿ng Anh riÃªng cho Ã¡nh sÃ¡ng' },
+        promptSnippetVi: { type: Type.STRING, description: 'Äoáº¡n mÃ´ táº£ tiáº¿ng Viá»‡t riÃªng cho Ã¡nh sÃ¡ng' },
+      },
+      required: ['sourceType', 'direction', 'colorTemperature', 'quality', 'detailedAnalysis'],
+    },
+    background: {
+      type: Type.OBJECT,
+      properties: {
+        settingType: { type: Type.STRING, description: 'Loáº¡i bá»‘i cáº£nh chÃ­nh' },
+        architecturalStyle: { type: Type.STRING, description: 'Phong cÃ¡ch kiáº¿n trÃºc' },
+        depthOfField: { type: Type.STRING, description: 'Äá»™ sÃ¢u trÆ°á»ng áº£nh' },
+        elements: { type: Type.ARRAY, items: { type: Type.STRING } },
+        objectsAndProps: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              name: { type: Type.STRING, description: 'TÃªn váº­t thá»ƒ' },
+              category: { type: Type.STRING, description: 'NhÃ³m váº­t thá»ƒ' },
+              description: { type: Type.STRING, description: 'MÃ´ táº£ chi tiáº¿t váº­t thá»ƒ' },
+              promptSnippet: { type: Type.STRING, description: 'Máº£nh prompt tiáº¿ng Anh' },
+            },
+            required: ['name'],
+          },
+        },
+        materials: { type: Type.ARRAY, items: { type: Type.STRING } },
+        atmosphere: { type: Type.STRING, description: 'Báº§u khÃ´ng khÃ­' },
+        detailedAnalysis: { type: Type.STRING, description: 'PhÃ¢n tÃ­ch chi tiáº¿t bá»‘i cáº£nh' },
+        promptSnippetEn: { type: Type.STRING, description: 'Prompt tiáº¿ng Anh cho bá»‘i cáº£nh' },
+        promptSnippetVi: { type: Type.STRING, description: 'Prompt tiáº¿ng Viá»‡t cho bá»‘i cáº£nh' },
+      },
+      required: ['settingType', 'depthOfField', 'elements', 'detailedAnalysis'],
+    },
+    camera: {
+      type: Type.OBJECT,
+      properties: {
+        shotType: { type: Type.STRING, description: 'GÃ³c chá»¥p' },
+        lensSuggestion: { type: Type.STRING, description: 'á»ng kÃ­nh gá»£i Ã½' },
+        compositionRule: { type: Type.STRING, description: 'Quy táº¯c bá»‘ cá»¥c' },
+        detailedAnalysis: { type: Type.STRING, description: 'PhÃ¢n tÃ­ch camera' },
+        promptSnippetEn: { type: Type.STRING, description: 'Prompt tiáº¿ng Anh cho camera' },
+        promptSnippetVi: { type: Type.STRING, description: 'Prompt tiáº¿ng Viá»‡t cho camera' },
+      },
+      required: ['shotType', 'lensSuggestion', 'compositionRule', 'detailedAnalysis'],
+    },
+    colorPalette: {
+      type: Type.OBJECT,
+      properties: {
+        dominantMood: { type: Type.STRING, description: 'TÃ´ng cáº£m xÃºc chÃ­nh' },
+        hexColors: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              hex: { type: Type.STRING, description: 'MÃ£ mÃ u HEX' },
+              name: { type: Type.STRING, description: 'TÃªn mÃ u sáº¯c' },
+              role: { type: Type.STRING, description: 'Vai trÃ² mÃ u sáº¯c' },
+            },
+            required: ['hex', 'name', 'role'],
+          },
+        },
+        colorGrading: { type: Type.STRING, description: 'Phong cÃ¡ch chá»‰nh mÃ u' },
+        promptSnippetEn: { type: Type.STRING, description: 'Prompt tiáº¿ng Anh cho mÃ u sáº¯c' },
+        promptSnippetVi: { type: Type.STRING, description: 'Prompt tiáº¿ng Viá»‡t cho mÃ u sáº¯c' },
+      },
+      required: ['dominantMood', 'hexColors', 'colorGrading'],
+    },
+    subjectDetails: {
+      type: Type.OBJECT,
+      properties: {
+        subjectType: { type: Type.STRING, description: 'Chá»§ thá»ƒ chÃ­nh' },
+        poseAndExpression: { type: Type.STRING, description: 'TÆ° tháº¿ vÃ  biá»ƒu cáº£m' },
+        texturesAndMaterials: { type: Type.STRING, description: 'Cháº¥t liá»‡u bá» máº·t' },
+        promptSnippetEn: { type: Type.STRING, description: 'Prompt tiáº¿ng Anh cho chá»§ thá»ƒ' },
+        promptSnippetVi: { type: Type.STRING, description: 'Prompt tiáº¿ng Viá»‡t cho chá»§ thá»ƒ' },
+      },
+      required: ['subjectType', 'poseAndExpression', 'texturesAndMaterials'],
+    },
+    recommendedPromptEn: { type: Type.STRING, description: 'Prompt tiáº¿ng Anh tá»‘i Æ°u' },
+    recommendedPromptVi: { type: Type.STRING, description: 'Prompt tiáº¿ng Viá»‡t chi tiáº¿t' },
+    negativePrompt: { type: Type.STRING, description: 'Negative prompt' },
+    suggestedAspectRatio: { type: Type.STRING, description: 'Tá»· lá»‡ khung hÃ¬nh Ä‘á» xuáº¥t' },
+    keyTags: { type: Type.ARRAY, items: { type: Type.STRING } },
+  },
+  required: [
+    'styleName', 'genre', 'styleDescription', 'lighting', 'background', 'camera',
+    'colorPalette', 'subjectDetails', 'recommendedPromptEn', 'recommendedPromptVi',
+    'negativePrompt', 'suggestedAspectRatio', 'keyTags',
+  ],
+};
+
 const generateImageSchema = z.object({
   prompt: z
     .string()
-    .min(1, 'Prompt không được để trống')
-    .max(4000, 'Prompt không được vượt quá 4000 ký tự'),
+    .min(1, 'Prompt khÃ´ng Ä‘Æ°á»£c Ä‘á»ƒ trá»‘ng')
+    .max(4000, 'Prompt khÃ´ng Ä‘Æ°á»£c vÆ°á»£t quÃ¡ 4000 kÃ½ tá»±'),
   negativePrompt: z.string().max(2000).optional().nullable(),
   aspectRatio: z
     .enum(['original', '1:1', '16:9', '9:16', '4:3', '3:2', '21:9', '3:4', '2:3'])
     .default('1:1'),
-  variations: z.number().int().min(1, 'Tối thiểu 1 biến thể').max(4, 'Tối đa 4 biến thể').default(1),
+  variations: z.number().int().min(1, 'Tá»‘i thiá»ƒu 1 biáº¿n thá»ƒ').max(4, 'Tá»‘i Ä‘a 4 biáº¿n thá»ƒ').default(1),
   quality: z.enum(['standard', 'high', 'raw']).optional().default('high'),
   seed: z.string().max(50).optional().default('-1'),
   model: z.string().max(150).optional(),
@@ -237,7 +342,7 @@ app.post('/api/gemini/analyze-style', aiLimiter, async (req, res) => {
     const parsed = analyzeStyleSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({
-        error: 'Dữ liệu đầu vào không hợp lệ',
+        error: 'Dá»¯ liá»‡u Ä‘áº§u vÃ o khÃ´ng há»£p lá»‡',
         details: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join(', '),
       });
     }
@@ -259,19 +364,19 @@ app.post('/api/gemini/analyze-style', aiLimiter, async (req, res) => {
     const promptText = `
 You are an elite creative director, cinematographer, and visual AI prompt engineer.
 Analyze the provided image in comprehensive, professional detail for the following aspects:
-1. Overall Art Style & Aesthetic (Phong cách tổng thể)
-2. In-Depth Background & Environment Breakdown (Phân tích bối cảnh cực kỳ chi tiết):
-   - Setting type (ví dụ: Lâu đài cổ Gothic Châu Âu, Biệt thự cổ điển, Studio tối giản, Loft tường xi măng mộc...)
-   - Architectural style (Phong cách kiến trúc, vòm cửa, cột trụ, ban công...)
-   - Objects and Props (Liệt kê tỉ mỉ mọi đồ vật, đạo cụ: Đèn chùm cổ điển, Đèn dầu/đèn bão, Tường xi măng tróc sơn, Tường đá rêu phong, Cửa sổ kính hoa đồng, Rèm nhung, Lò sưởi, Tranh cổ mạ vàng, Bình hoa...)
-   - Materials & Textures (Vật liệu: Xi măng thô, Đá cổ phong hóa, Gỗ sồi mộc, Kim loại đồng gỉ, Thủy tinh pha lê...)
-   - Atmosphere & Environmental mood (Bầu không khí: Sương mù huyền bí, Bụi bay lơ lửng trong vạt nắng, Ánh nến lung linh...)
-   - Depth of field (Độ sâu trường ảnh DOF, Bokeh)
-3. Lighting & Illumination (Ánh sáng: hướng sáng, nguồn sáng, nhiệt độ màu, độ gắt/dịu, bóng đổ Chiaroscuro...)
-4. Camera & Optical Composition (Góc máy, bố cục, tiêu cự ống kính đề xuất, khẩu độ)
-5. Color Palette & Mood (Bảng màu chủ đạo, các mã HEX nổi bật, tông cảm xúc, Color grading)
-6. Subject & Textures (Chủ thể, thần thái, chất liệu bề mặt)
-7. Modular Prompt Snippets (Từng mảnh ghép prompt độc lập để người dùng có thể tùy ý tích chọn từng phần ghép vào prompt):
+1. Overall Art Style & Aesthetic (Phong cÃ¡ch tá»•ng thá»ƒ)
+2. In-Depth Background & Environment Breakdown (PhÃ¢n tÃ­ch bá»‘i cáº£nh cá»±c ká»³ chi tiáº¿t):
+   - Setting type (vÃ­ dá»¥: LÃ¢u Ä‘Ã i cá»• Gothic ChÃ¢u Ã‚u, Biá»‡t thá»± cá»• Ä‘iá»ƒn, Studio tá»‘i giáº£n, Loft tÆ°á»ng xi mÄƒng má»™c...)
+   - Architectural style (Phong cÃ¡ch kiáº¿n trÃºc, vÃ²m cá»­a, cá»™t trá»¥, ban cÃ´ng...)
+   - Objects and Props (Liá»‡t kÃª tá»‰ má»‰ má»i Ä‘á»“ váº­t, Ä‘áº¡o cá»¥: ÄÃ¨n chÃ¹m cá»• Ä‘iá»ƒn, ÄÃ¨n dáº§u/Ä‘Ã¨n bÃ£o, TÆ°á»ng xi mÄƒng trÃ³c sÆ¡n, TÆ°á»ng Ä‘Ã¡ rÃªu phong, Cá»­a sá»• kÃ­nh hoa Ä‘á»“ng, RÃ¨m nhung, LÃ² sÆ°á»Ÿi, Tranh cá»• máº¡ vÃ ng, BÃ¬nh hoa...)
+   - Materials & Textures (Váº­t liá»‡u: Xi mÄƒng thÃ´, ÄÃ¡ cá»• phong hÃ³a, Gá»— sá»“i má»™c, Kim loáº¡i Ä‘á»“ng gá»‰, Thá»§y tinh pha lÃª...)
+   - Atmosphere & Environmental mood (Báº§u khÃ´ng khÃ­: SÆ°Æ¡ng mÃ¹ huyá»n bÃ­, Bá»¥i bay lÆ¡ lá»­ng trong váº¡t náº¯ng, Ãnh náº¿n lung linh...)
+   - Depth of field (Äá»™ sÃ¢u trÆ°á»ng áº£nh DOF, Bokeh)
+3. Lighting & Illumination (Ãnh sÃ¡ng: hÆ°á»›ng sÃ¡ng, nguá»“n sÃ¡ng, nhiá»‡t Ä‘á»™ mÃ u, Ä‘á»™ gáº¯t/dá»‹u, bÃ³ng Ä‘á»• Chiaroscuro...)
+4. Camera & Optical Composition (GÃ³c mÃ¡y, bá»‘ cá»¥c, tiÃªu cá»± á»‘ng kÃ­nh Ä‘á» xuáº¥t, kháº©u Ä‘á»™)
+5. Color Palette & Mood (Báº£ng mÃ u chá»§ Ä‘áº¡o, cÃ¡c mÃ£ HEX ná»•i báº­t, tÃ´ng cáº£m xÃºc, Color grading)
+6. Subject & Textures (Chá»§ thá»ƒ, tháº§n thÃ¡i, cháº¥t liá»‡u bá» máº·t)
+7. Modular Prompt Snippets (Tá»«ng máº£nh ghÃ©p prompt Ä‘á»™c láº­p Ä‘á»ƒ ngÆ°á»i dÃ¹ng cÃ³ thá»ƒ tÃ¹y Ã½ tÃ­ch chá»n tá»«ng pháº§n ghÃ©p vÃ o prompt):
    - Background prompt snippet (English & Vietnamese)
    - Lighting prompt snippet (English & Vietnamese)
    - Camera prompt snippet (English & Vietnamese)
@@ -312,133 +417,7 @@ Respond strictly in JSON format matching the schema.
           systemInstruction:
             'You are a world-class cinematographer and AI art director. Provide exceptionally deep, evocative visual analysis in Vietnamese with modular and master English/Vietnamese prompt snippets.',
           responseMimeType: 'application/json',
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              styleName: { type: Type.STRING, description: 'Tên phong cách' },
-              genre: { type: Type.STRING, description: 'Thể loại nghệ thuật' },
-              styleDescription: { type: Type.STRING, description: 'Mô tả chi tiết phong cách' },
-              lighting: {
-                type: Type.OBJECT,
-                properties: {
-                  sourceType: { type: Type.STRING, description: 'Nguồn sáng (Tự nhiên, Đèn studio, Neon, Ánh nến...)' },
-                  direction: { type: Type.STRING, description: 'Hướng sáng (Góc nghiêng 45 độ, Hắt sau, Ngược sáng...)' },
-                  colorTemperature: { type: Type.STRING, description: 'Nhiệt độ màu (Ấm 3200K, Trung tính 5000K, Lạnh 6500K...)' },
-                  quality: { type: Type.STRING, description: 'Độ mềm/gắt (Khuếch tán dịu, Tương phản cao Chiaroscuro...)' },
-                  detailedAnalysis: { type: Type.STRING, description: 'Phân tích chi tiết ánh sáng và bóng đổ' },
-                  promptSnippetEn: { type: Type.STRING, description: 'Đoạn prompt tiếng Anh riêng cho ánh sáng' },
-                  promptSnippetVi: { type: Type.STRING, description: 'Đoạn mô tả tiếng Việt riêng cho ánh sáng' },
-                },
-                required: ['sourceType', 'direction', 'colorTemperature', 'quality', 'detailedAnalysis'],
-              },
-              background: {
-                type: Type.OBJECT,
-                properties: {
-                  settingType: { type: Type.STRING, description: 'Loại bối cảnh chính (ví dụ: Lâu đài cổ Gothic, Biệt thự cổ điển, Studio tường xi măng thô...)' },
-                  architecturalStyle: { type: Type.STRING, description: 'Phong cách kiến trúc & kết cấu không gian' },
-                  depthOfField: { type: Type.STRING, description: 'Độ sâu trường ảnh (Xóa phông mờ ảo Bokeh, Rõ nét toàn cảnh...)' },
-                  elements: {
-                    type: Type.ARRAY,
-                    items: { type: Type.STRING },
-                    description: 'Các vật thể và chi tiết xuất hiện ở hậu cảnh',
-                  },
-                  objectsAndProps: {
-                    type: Type.ARRAY,
-                    items: {
-                      type: Type.OBJECT,
-                      properties: {
-                        name: { type: Type.STRING, description: 'Tên vật thể (ví dụ: Đèn chùm cổ điển, Tường xi măng mộc, Khung tranh dát vàng...)' },
-                        category: { type: Type.STRING, description: 'Nhóm (lighting_prop, furniture, architecture, material, nature, decoration, other)' },
-                        description: { type: Type.STRING, description: 'Mô tả chi tiết vật thể' },
-                        promptSnippet: { type: Type.STRING, description: 'Mảnh prompt tiếng Anh mô tả vật thể này' },
-                      },
-                      required: ['name'],
-                    },
-                    description: 'Danh sách các vật thể/đạo cụ cụ thể trong bối cảnh',
-                  },
-                  materials: {
-                    type: Type.ARRAY,
-                    items: { type: Type.STRING },
-                    description: 'Các chất liệu nhận diện được (ví dụ: Xi măng thô, Đá cổ phong hóa, Gỗ mun, Thủy tinh pha lê...)',
-                  },
-                  atmosphere: { type: Type.STRING, description: 'Bầu không khí & hiệu ứng môi trường (Sương mù, bụi nắng, lung linh...)' },
-                  detailedAnalysis: { type: Type.STRING, description: 'Phân tích chi tiết toàn diện về bối cảnh và vật thể' },
-                  promptSnippetEn: { type: Type.STRING, description: 'Đoạn prompt tiếng Anh riêng cho bối cảnh & vật thể' },
-                  promptSnippetVi: { type: Type.STRING, description: 'Đoạn mô tả tiếng Việt riêng cho bối cảnh & vật thể' },
-                },
-                required: ['settingType', 'depthOfField', 'elements', 'detailedAnalysis'],
-              },
-              camera: {
-                type: Type.OBJECT,
-                properties: {
-                  shotType: { type: Type.STRING, description: 'Góc chụp (Chân dung cận cảnh, Trung cảnh, Toàn cảnh...)' },
-                  lensSuggestion: { type: Type.STRING, description: 'Ống kính gợi ý (ví dụ: 85mm f/1.4, 35mm f/1.8)' },
-                  compositionRule: { type: Type.STRING, description: 'Quy tắc bố cục (Quy tắc 1/3, Đối xứng tâm, Đường dẫn...)' },
-                  detailedAnalysis: { type: Type.STRING, description: 'Phân tích kỹ thuật quang học và góc chụp' },
-                  promptSnippetEn: { type: Type.STRING, description: 'Đoạn prompt tiếng Anh riêng cho góc máy & bố cục' },
-                  promptSnippetVi: { type: Type.STRING, description: 'Đoạn mô tả tiếng Việt riêng cho góc máy & bố cục' },
-                },
-                required: ['shotType', 'lensSuggestion', 'compositionRule', 'detailedAnalysis'],
-              },
-              colorPalette: {
-                type: Type.OBJECT,
-                properties: {
-                  dominantMood: { type: Type.STRING, description: 'Tông cảm xúc chính (Hoài niệm, Sang trọng, Bí ẩn, Rực rỡ...)' },
-                  hexColors: {
-                    type: Type.ARRAY,
-                    items: {
-                      type: Type.OBJECT,
-                      properties: {
-                        hex: { type: Type.STRING, description: 'Mã màu HEX e.g. #D4A373' },
-                        name: { type: Type.STRING, description: 'Tên màu sắc' },
-                        role: { type: Type.STRING, description: 'Vai trò (Chủ đạo, Điểm nhấn, Nền, Ánh sáng)' },
-                      },
-                      required: ['hex', 'name', 'role'],
-                    },
-                  },
-                  colorGrading: { type: Type.STRING, description: 'Phong cách chỉnh màu (Color Grading)' },
-                  promptSnippetEn: { type: Type.STRING, description: 'Đoạn prompt tiếng Anh riêng cho màu sắc & grading' },
-                  promptSnippetVi: { type: Type.STRING, description: 'Đoạn mô tả tiếng Việt riêng cho màu sắc & grading' },
-                },
-                required: ['dominantMood', 'hexColors', 'colorGrading'],
-              },
-              subjectDetails: {
-                type: Type.OBJECT,
-                properties: {
-                  subjectType: { type: Type.STRING, description: 'Chủ thể chính' },
-                  poseAndExpression: { type: Type.STRING, description: 'Tư thế và biểu cảm' },
-                  texturesAndMaterials: { type: Type.STRING, description: 'Chất liệu bề mặt và chi tiết' },
-                  promptSnippetEn: { type: Type.STRING, description: 'Đoạn prompt tiếng Anh riêng cho chi tiết bề mặt/chủ thể' },
-                  promptSnippetVi: { type: Type.STRING, description: 'Đoạn mô tả tiếng Việt riêng cho chi tiết bề mặt/chủ thể' },
-                },
-                required: ['subjectType', 'poseAndExpression', 'texturesAndMaterials'],
-              },
-              recommendedPromptEn: { type: Type.STRING, description: 'Prompt tiếng Anh tối ưu cho AI generation' },
-              recommendedPromptVi: { type: Type.STRING, description: 'Mô tả prompt tiếng Việt chi tiết' },
-              negativePrompt: { type: Type.STRING, description: 'Negative prompt loại trừ lỗi' },
-              suggestedAspectRatio: { type: Type.STRING, description: 'Tỷ lệ khung hình đề xuất (1:1, 16:9, 9:16, 4:3, 3:2)' },
-              keyTags: {
-                type: Type.ARRAY,
-                items: { type: Type.STRING },
-                description: 'Các từ khóa quan trọng nhất để tạo phong cách tương tự',
-              },
-            },
-            required: [
-              'styleName',
-              'genre',
-              'styleDescription',
-              'lighting',
-              'background',
-              'camera',
-              'colorPalette',
-              'subjectDetails',
-              'recommendedPromptEn',
-              'recommendedPromptVi',
-              'negativePrompt',
-              'suggestedAspectRatio',
-              'keyTags',
-            ],
-          },
+          responseSchema: ANALYSIS_RESPONSE_SCHEMA,
         },
       });
     } catch (primaryErr: any) {
@@ -465,6 +444,7 @@ Respond strictly in JSON format matching the schema.
             systemInstruction:
               'You are a world-class cinematographer and AI art director. Provide exceptionally deep visual analysis in Vietnamese with modular prompt snippets.',
             responseMimeType: 'application/json',
+            responseSchema: ANALYSIS_RESPONSE_SCHEMA,
           },
         });
       } catch (secondaryErr: any) {
@@ -519,7 +499,7 @@ app.post('/api/generate-image', aiLimiter, async (req, res) => {
     const parsed = generateImageSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({
-        error: 'Dữ liệu đầu vào không hợp lệ',
+        error: 'Dá»¯ liá»‡u Ä‘áº§u vÃ o khÃ´ng há»£p lá»‡',
         details: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join(', '),
         success: false,
       });
@@ -550,7 +530,7 @@ app.post('/api/generate-image', aiLimiter, async (req, res) => {
 
         if (!isAllowed) {
           return res.status(400).json({
-            error: `Tên miền endpoint '${hostname}' không nằm trong danh sách được phép. Chỉ cho phép các domain: ${OPENAI_ALLOWED_DOMAINS.join(
+            error: `TÃªn miá»n endpoint '${hostname}' khÃ´ng náº±m trong danh sÃ¡ch Ä‘Æ°á»£c phÃ©p. Chá»‰ cho phÃ©p cÃ¡c domain: ${OPENAI_ALLOWED_DOMAINS.join(
               ', '
             )}`,
             success: false,
@@ -558,7 +538,7 @@ app.post('/api/generate-image', aiLimiter, async (req, res) => {
         }
       } catch (urlErr) {
         return res.status(400).json({
-          error: 'customEndpoint không phải là một URL hợp lệ.',
+          error: 'customEndpoint khÃ´ng pháº£i lÃ  má»™t URL há»£p lá»‡.',
           success: false,
         });
       }
