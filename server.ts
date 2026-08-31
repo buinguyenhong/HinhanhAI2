@@ -1,4 +1,4 @@
-﻿import express, { Request, Response, NextFunction } from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
@@ -47,7 +47,7 @@ const apiLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: {
-    error: 'Báº¡n Ä‘Ã£ gá»­i quÃ¡ nhiá»u yÃªu cáº§u Ä‘áº¿n há»‡ thá»‘ng. Vui lÃ²ng thá»­ láº¡i sau Ã­t phÃºt.',
+    error: 'Bạn đã gửi quá nhiều yêu cầu đến hệ thống. Vui lòng thử lại sau ít phút.',
   },
 });
 
@@ -58,7 +58,7 @@ const aiLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: {
-    error: 'Báº¡n Ä‘Ã£ Ä‘áº¡t giá»›i háº¡n yÃªu cáº§u AI (tá»‘i Ä‘a 20 yÃªu cáº§u / 15 phÃºt). Vui lÃ²ng thá»­ láº¡i sau.',
+    error: 'Bạn đã đạt giới hạn yêu cầu AI (tối đa 20 yêu cầu / 15 phút). Vui lòng thử lại sau.',
   },
 });
 
@@ -69,7 +69,7 @@ const loginLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: {
-    error: 'ÄÃ£ thá»­ Ä‘Äƒng nháº­p quÃ¡ nhiá»u láº§n. Vui lÃ²ng Ä‘á»£i 15 phÃºt trÆ°á»›c khi thá»­ láº¡i.',
+    error: 'Đã thử đăng nhập quá nhiều lần. Vui lòng đợi 15 phút trước khi thử lại.',
   },
 });
 
@@ -97,7 +97,7 @@ function requireAuth(req: AuthenticatedRequest, res: Response, next: NextFunctio
 
   if (!token) {
     return res.status(401).json({
-      error: 'YÃªu cáº§u xÃ¡c thá»±c. Vui lÃ²ng Ä‘Äƒng nháº­p Ä‘á»ƒ tiáº¿p tá»¥c.',
+      error: 'Yêu cầu xác thực. Vui lòng đăng nhập để tiếp tục.',
       code: 'UNAUTHORIZED',
     });
   }
@@ -108,7 +108,7 @@ function requireAuth(req: AuthenticatedRequest, res: Response, next: NextFunctio
     next();
   } catch (err: any) {
     return res.status(401).json({
-      error: 'MÃ£ xÃ¡c thá»±c Ä‘Ã£ háº¿t háº¡n hoáº·c khÃ´ng há»£p lá»‡. Vui lÃ²ng Ä‘Äƒng nháº­p láº¡i.',
+      error: 'Mã xác thực đã hết hạn hoặc không hợp lệ. Vui lòng đăng nhập lại.',
       code: 'INVALID_TOKEN',
     });
   }
@@ -123,7 +123,7 @@ app.get('/api/health', (req, res) => {
 
 // 2. Login validation schema
 const loginSchema = z.object({
-  password: z.string().min(1, 'Máº­t kháº©u khÃ´ng Ä‘Æ°á»£c Ä‘á»ƒ trá»‘ng').max(200, 'Máº­t kháº©u quÃ¡ dÃ i'),
+  password: z.string().min(1, 'Mật khẩu không được để trống').max(200, 'Mật kh�u quá dài'),
 });
 
 // POST /api/login (Public with loginLimiter)
@@ -131,7 +131,7 @@ app.post('/api/login', loginLimiter, (req, res) => {
   const parsed = loginSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({
-      error: 'Dá»¯ liá»‡u khÃ´ng há»£p lá»‡',
+      error: 'Dữ liệu không hợp lệ',
       details: parsed.error.issues.map((i) => i.message).join(', '),
     });
   }
@@ -141,7 +141,7 @@ app.post('/api/login', loginLimiter, (req, res) => {
   // Constant-time like comparison or direct string equality check
   if (password !== APP_PASSWORD) {
     return res.status(401).json({
-      error: 'MÃ£ truy cáº­p khÃ´ng há»£p lá»‡. Vui lÃ²ng kiá»ƒm tra láº¡i.',
+      error: 'Mã truy cập không hợp lệ. Vui lòng kiểm tra lại.',
     });
   }
 
@@ -202,181 +202,151 @@ function getGeminiClient(): GoogleGenAI | null {
   return geminiClient;
 }
 
-// --- ZOD INPUT VALIDATION SCHEMAS ---
-
-const analyzeStyleSchema = z.object({
-  imageBase64: z.string().min(1, 'áº¢nh phÃ¢n tÃ­ch khÃ´ng Ä‘Æ°á»£c Ä‘á»ƒ trá»‘ng'),
-  mimeType: z.string().max(100).optional().default('image/jpeg'),
-  userFocus: z.string().max(2000).optional().nullable(),
-});
-
-const ANALYSIS_RESPONSE_SCHEMA = {
+// --- SHARED ANALYSIS RESPONSE SCHEMA (used by Gemini JSON schema; openai/anthropic prompted to follow) ---
+const ANALYSIS_RESPONSE_SCHEMA: any = {
   type: Type.OBJECT,
   properties: {
-    styleName: { type: Type.STRING, description: 'TÃªn phong cÃ¡ch' },
-    genre: { type: Type.STRING, description: 'Thá»ƒ loáº¡i nghá»‡ thuáº­t' },
-    styleDescription: { type: Type.STRING, description: 'MÃ´ táº£ chi tiáº¿t phong cÃ¡ch' },
+    styleName: { type: Type.STRING, description: 'Tên phong cách' },
+    genre: { type: Type.STRING, description: 'Thể loại nghệ thuật' },
+    styleDescription: { type: Type.STRING, description: 'Mô tả chi tiết phong cách' },
     lighting: {
       type: Type.OBJECT,
       properties: {
-        sourceType: { type: Type.STRING, description: 'Nguá»“n sÃ¡ng' },
-        direction: { type: Type.STRING, description: 'HÆ°á»›ng sÃ¡ng' },
-        colorTemperature: { type: Type.STRING, description: 'Nhiá»‡t Ä‘á»™ mÃ u' },
-        quality: { type: Type.STRING, description: 'Äá»™ má»m/gáº¯t' },
-        detailedAnalysis: { type: Type.STRING, description: 'PhÃ¢n tÃ­ch chi tiáº¿t Ã¡nh sÃ¡ng vÃ  bÃ³ng Ä‘á»•' },
-        promptSnippetEn: { type: Type.STRING, description: 'Äoáº¡n prompt tiáº¿ng Anh riÃªng cho Ã¡nh sÃ¡ng' },
-        promptSnippetVi: { type: Type.STRING, description: 'Äoáº¡n mÃ´ táº£ tiáº¿ng Viá»‡t riÃªng cho Ã¡nh sÃ¡ng' },
+        sourceType: { type: Type.STRING, description: 'Nguồn sáng (Tự nhiên, Đèn studio, Neon, Ánh nến...)' },
+        direction: { type: Type.STRING, description: 'Hướng sáng (Góc nghiêng 45 độ, Hắt sau, Ngược sáng...)' },
+        colorTemperature: { type: Type.STRING, description: 'Nhiệt độ màu (Ấm 3200K, Trung tính 5000K, Lạnh 6500K...)' },
+        quality: { type: Type.STRING, description: 'Độ mềm/gắt (Khuếch tán dịu, Tương phản cao Chiaroscuro...)' },
+        detailedAnalysis: { type: Type.STRING, description: 'Phân tích chi tiết ánh sáng và bóng đổ' },
+        promptSnippetEn: { type: Type.STRING, description: 'Đoạn prompt tiếng Anh riêng cho ánh sáng' },
+        promptSnippetVi: { type: Type.STRING, description: '�oạn mô tả tiếng Việt riêng cho ánh sáng' },
       },
       required: ['sourceType', 'direction', 'colorTemperature', 'quality', 'detailedAnalysis'],
     },
     background: {
       type: Type.OBJECT,
       properties: {
-        settingType: { type: Type.STRING, description: 'Loáº¡i bá»‘i cáº£nh chÃ­nh' },
-        architecturalStyle: { type: Type.STRING, description: 'Phong cÃ¡ch kiáº¿n trÃºc' },
-        depthOfField: { type: Type.STRING, description: 'Äá»™ sÃ¢u trÆ°á»ng áº£nh' },
-        elements: { type: Type.ARRAY, items: { type: Type.STRING } },
+        settingType: { type: Type.STRING, description: 'Loại bối cảnh chính' },
+        architecturalStyle: { type: Type.STRING, description: 'Phong cách kiến trúc & kết cấu không gian' },
+        depthOfField: { type: Type.STRING, description: 'Độ sâu trường ảnh (Xóa phông mờ ảo Bokeh, Rõ nét toàn cảnh...)' },
+        elements: {
+          type: Type.ARRAY,
+          items: { type: Type.STRING },
+          description: 'Các vật thể và chi tiết xuất hiện ở hậu cảnh',
+        },
         objectsAndProps: {
           type: Type.ARRAY,
           items: {
             type: Type.OBJECT,
             properties: {
-              name: { type: Type.STRING, description: 'TÃªn váº­t thá»ƒ' },
-              category: { type: Type.STRING, description: 'NhÃ³m váº­t thá»ƒ' },
-              description: { type: Type.STRING, description: 'MÃ´ táº£ chi tiáº¿t váº­t thá»ƒ' },
-              promptSnippet: { type: Type.STRING, description: 'Máº£nh prompt tiáº¿ng Anh' },
+              name: { type: Type.STRING, description: 'Tên vật thể' },
+              category: { type: Type.STRING, description: 'Nhóm (lighting_prop, furniture, architecture, material, nature, decoration, other)' },
+              description: { type: Type.STRING, description: 'Mô tả chi tiết vật thể' },
+              promptSnippet: { type: Type.STRING, description: 'Mảnh prompt tiếng Anh mô tả vật thể này' },
             },
             required: ['name'],
           },
+          description: 'Danh sách các vật thể/đạo cụ cụ thể trong bối cảnh',
         },
-        materials: { type: Type.ARRAY, items: { type: Type.STRING } },
-        atmosphere: { type: Type.STRING, description: 'Báº§u khÃ´ng khÃ­' },
-        detailedAnalysis: { type: Type.STRING, description: 'PhÃ¢n tÃ­ch chi tiáº¿t bá»‘i cáº£nh' },
-        promptSnippetEn: { type: Type.STRING, description: 'Prompt tiáº¿ng Anh cho bá»‘i cáº£nh' },
-        promptSnippetVi: { type: Type.STRING, description: 'Prompt tiáº¿ng Viá»‡t cho bá»‘i cáº£nh' },
+        materials: {
+          type: Type.ARRAY,
+          items: { type: Type.STRING },
+          description: 'Các chất liệu nhận diện được',
+        },
+        atmosphere: { type: Type.STRING, description: 'Bầu không khí & hiệu ứng môi trường' },
+        detailedAnalysis: { type: Type.STRING, description: 'Phân tích chi tiết toàn diện về bối cảnh và vật thể' },
+        promptSnippetEn: { type: Type.STRING, description: 'Đoạn prompt tiếng Anh riêng cho bối cảnh & vật thể' },
+        promptSnippetVi: { type: Type.STRING, description: 'Đoạn mô tả tiếng Việt riêng cho bối cảnh & vật thể' },
       },
       required: ['settingType', 'depthOfField', 'elements', 'detailedAnalysis'],
     },
     camera: {
       type: Type.OBJECT,
       properties: {
-        shotType: { type: Type.STRING, description: 'GÃ³c chá»¥p' },
-        lensSuggestion: { type: Type.STRING, description: 'á»ng kÃ­nh gá»£i Ã½' },
-        compositionRule: { type: Type.STRING, description: 'Quy táº¯c bá»‘ cá»¥c' },
-        detailedAnalysis: { type: Type.STRING, description: 'PhÃ¢n tÃ­ch camera' },
-        promptSnippetEn: { type: Type.STRING, description: 'Prompt tiáº¿ng Anh cho camera' },
-        promptSnippetVi: { type: Type.STRING, description: 'Prompt tiáº¿ng Viá»‡t cho camera' },
+        shotType: { type: Type.STRING, description: 'Góc chụp (Chân dung cận cảnh, Trung cảnh, Toàn cảnh...)' },
+        lensSuggestion: { type: Type.STRING, description: 'Ống kính gợi ý (ví dụ: 85mm f/1.4, 35mm f/1.8)' },
+        compositionRule: { type: Type.STRING, description: 'Quy tắc bố cục (Quy tắc 1/3, Đối xứng tâm, Đường dẫn...)' },
+        detailedAnalysis: { type: Type.STRING, description: 'Phân tích kỹ thuật quang học và góc chụp' },
+        promptSnippetEn: { type: Type.STRING, description: 'Đoạn prompt tiếng Anh riêng cho góc máy & bố cục' },
+        promptSnippetVi: { type: Type.STRING, description: 'Đoạn mô tả tiếng Việt riêng cho góc máy & bố cục' },
       },
       required: ['shotType', 'lensSuggestion', 'compositionRule', 'detailedAnalysis'],
     },
     colorPalette: {
       type: Type.OBJECT,
       properties: {
-        dominantMood: { type: Type.STRING, description: 'TÃ´ng cáº£m xÃºc chÃ­nh' },
+        dominantMood: { type: Type.STRING, description: 'Tông cảm xúc chính (Hoài niệm, Sang trọng, Bí ẩn, Rực rỡ...)' },
         hexColors: {
           type: Type.ARRAY,
           items: {
             type: Type.OBJECT,
             properties: {
-              hex: { type: Type.STRING, description: 'MÃ£ mÃ u HEX' },
-              name: { type: Type.STRING, description: 'TÃªn mÃ u sáº¯c' },
-              role: { type: Type.STRING, description: 'Vai trÃ² mÃ u sáº¯c' },
+              hex: { type: Type.STRING, description: 'Mã màu HEX e.g. #D4A373' },
+              name: { type: Type.STRING, description: 'Tên màu sắc' },
+              role: { type: Type.STRING, description: 'Vai trò (Chủ đạo, Điểm nhấn, Nền, Ánh sáng)' },
             },
             required: ['hex', 'name', 'role'],
           },
         },
-        colorGrading: { type: Type.STRING, description: 'Phong cÃ¡ch chá»‰nh mÃ u' },
-        promptSnippetEn: { type: Type.STRING, description: 'Prompt tiáº¿ng Anh cho mÃ u sáº¯c' },
-        promptSnippetVi: { type: Type.STRING, description: 'Prompt tiáº¿ng Viá»‡t cho mÃ u sáº¯c' },
+        colorGrading: { type: Type.STRING, description: 'Phong cách chỉnh màu (Color Grading)' },
+        promptSnippetEn: { type: Type.STRING, description: 'Đoạn prompt tiếng Anh riêng cho màu sắc & grading' },
+        promptSnippetVi: { type: Type.STRING, description: 'Đoạn mô tả tiếng Việt riêng cho màu sắc & grading' },
       },
       required: ['dominantMood', 'hexColors', 'colorGrading'],
     },
     subjectDetails: {
       type: Type.OBJECT,
       properties: {
-        subjectType: { type: Type.STRING, description: 'Chá»§ thá»ƒ chÃ­nh' },
-        poseAndExpression: { type: Type.STRING, description: 'TÆ° tháº¿ vÃ  biá»ƒu cáº£m' },
-        texturesAndMaterials: { type: Type.STRING, description: 'Cháº¥t liá»‡u bá» máº·t' },
-        promptSnippetEn: { type: Type.STRING, description: 'Prompt tiáº¿ng Anh cho chá»§ thá»ƒ' },
-        promptSnippetVi: { type: Type.STRING, description: 'Prompt tiáº¿ng Viá»‡t cho chá»§ thá»ƒ' },
+        subjectType: { type: Type.STRING, description: 'Chủ thể chính' },
+        poseAndExpression: { type: Type.STRING, description: 'Tư thế và biểu cảm' },
+        texturesAndMaterials: { type: Type.STRING, description: 'Chất liệu bề mặt và chi tiết' },
+        promptSnippetEn: { type: Type.STRING, description: 'Đoạn prompt tiếng Anh riêng cho chi tiết bề mặt/chủ thể' },
+        promptSnippetVi: { type: Type.STRING, description: 'Đoạn mô tả tiếng Việt riêng cho chi tiết bề mặt/chủ thể' },
       },
       required: ['subjectType', 'poseAndExpression', 'texturesAndMaterials'],
     },
-    recommendedPromptEn: { type: Type.STRING, description: 'Prompt tiáº¿ng Anh tá»‘i Æ°u' },
-    recommendedPromptVi: { type: Type.STRING, description: 'Prompt tiáº¿ng Viá»‡t chi tiáº¿t' },
-    negativePrompt: { type: Type.STRING, description: 'Negative prompt' },
-    suggestedAspectRatio: { type: Type.STRING, description: 'Tá»· lá»‡ khung hÃ¬nh Ä‘á» xuáº¥t' },
-    keyTags: { type: Type.ARRAY, items: { type: Type.STRING } },
+    recommendedPromptEn: { type: Type.STRING, description: 'Prompt tiếng Anh tối ưu cho AI generation' },
+    recommendedPromptVi: { type: Type.STRING, description: 'Mô tả prompt tiếng Việt chi tiết' },
+    negativePrompt: { type: Type.STRING, description: 'Negative prompt loại trừ lỗi' },
+    suggestedAspectRatio: { type: Type.STRING, description: 'Tỷ lệ khung hình đề xuất (1:1, 16:9, 9:16, 4:3, 3:2)' },
+    keyTags: {
+      type: Type.ARRAY,
+      items: { type: Type.STRING },
+      description: 'Các từ khóa quan trọng nhất để tạo phong cách tương tự',
+    },
   },
   required: [
-    'styleName', 'genre', 'styleDescription', 'lighting', 'background', 'camera',
-    'colorPalette', 'subjectDetails', 'recommendedPromptEn', 'recommendedPromptVi',
-    'negativePrompt', 'suggestedAspectRatio', 'keyTags',
+    'styleName',
+    'genre',
+    'styleDescription',
+    'lighting',
+    'background',
+    'camera',
+    'colorPalette',
+    'subjectDetails',
+    'recommendedPromptEn',
+    'recommendedPromptVi',
+    'negativePrompt',
+    'suggestedAspectRatio',
+    'keyTags',
   ],
 };
 
-const generateImageSchema = z.object({
-  prompt: z
-    .string()
-    .min(1, 'Prompt khÃ´ng Ä‘Æ°á»£c Ä‘á»ƒ trá»‘ng')
-    .max(4000, 'Prompt khÃ´ng Ä‘Æ°á»£c vÆ°á»£t quÃ¡ 4000 kÃ½ tá»±'),
-  negativePrompt: z.string().max(2000).optional().nullable(),
-  aspectRatio: z
-    .enum(['original', '1:1', '16:9', '9:16', '4:3', '3:2', '21:9', '3:4', '2:3'])
-    .default('1:1'),
-  variations: z.number().int().min(1, 'Tá»‘i thiá»ƒu 1 biáº¿n thá»ƒ').max(4, 'Tá»‘i Ä‘a 4 biáº¿n thá»ƒ').default(1),
-  quality: z.enum(['standard', 'high', 'raw']).optional().default('high'),
-  seed: z.string().max(50).optional().default('-1'),
-  model: z.string().max(150).optional(),
-  provider: z.enum(['gemini', 'openai', 'custom']).optional().default('gemini'),
-  customApiKey: z.string().max(500).optional().nullable(),
-  customEndpoint: z.string().max(500).optional().nullable(),
-  customHeaders: z.record(z.string(), z.string()).optional().nullable(),
-  sourceImageBase64: z.string().optional().nullable(),
-  referenceImageBase64: z.string().optional().nullable(),
-});
-
-// Endpoint: AI Image Style, Background, Lighting & Composition Analyzer
-app.post('/api/gemini/analyze-style', aiLimiter, async (req, res) => {
-  try {
-    const parsed = analyzeStyleSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return res.status(400).json({
-        error: 'Dá»¯ liá»‡u Ä‘áº§u vÃ o khÃ´ng há»£p lá»‡',
-        details: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join(', '),
-      });
-    }
-
-    const { imageBase64, mimeType = 'image/jpeg', userFocus } = parsed.data;
-
-    const ai = getGeminiClient();
-    if (!ai) {
-      // Return structured fallback flag so client can use visual engine
-      return res.status(200).json({
-        fallback: true,
-        message: 'No GEMINI_API_KEY detected on server. Using built-in visual intelligence engine.',
-      });
-    }
-
-    // Clean base64 string
-    const cleanBase64 = imageBase64.replace(/^data:image\/[a-zA-Z0-9+]+;base64,/, '');
-
-    const promptText = `
+const ANALYSIS_PROMPT_TEXT = `
 You are an elite creative director, cinematographer, and visual AI prompt engineer.
 Analyze the provided image in comprehensive, professional detail for the following aspects:
-1. Overall Art Style & Aesthetic (Phong cÃ¡ch tá»•ng thá»ƒ)
-2. In-Depth Background & Environment Breakdown (PhÃ¢n tÃ­ch bá»‘i cáº£nh cá»±c ká»³ chi tiáº¿t):
-   - Setting type (vÃ­ dá»¥: LÃ¢u Ä‘Ã i cá»• Gothic ChÃ¢u Ã‚u, Biá»‡t thá»± cá»• Ä‘iá»ƒn, Studio tá»‘i giáº£n, Loft tÆ°á»ng xi mÄƒng má»™c...)
-   - Architectural style (Phong cÃ¡ch kiáº¿n trÃºc, vÃ²m cá»­a, cá»™t trá»¥, ban cÃ´ng...)
-   - Objects and Props (Liá»‡t kÃª tá»‰ má»‰ má»i Ä‘á»“ váº­t, Ä‘áº¡o cá»¥: ÄÃ¨n chÃ¹m cá»• Ä‘iá»ƒn, ÄÃ¨n dáº§u/Ä‘Ã¨n bÃ£o, TÆ°á»ng xi mÄƒng trÃ³c sÆ¡n, TÆ°á»ng Ä‘Ã¡ rÃªu phong, Cá»­a sá»• kÃ­nh hoa Ä‘á»“ng, RÃ¨m nhung, LÃ² sÆ°á»Ÿi, Tranh cá»• máº¡ vÃ ng, BÃ¬nh hoa...)
-   - Materials & Textures (Váº­t liá»‡u: Xi mÄƒng thÃ´, ÄÃ¡ cá»• phong hÃ³a, Gá»— sá»“i má»™c, Kim loáº¡i Ä‘á»“ng gá»‰, Thá»§y tinh pha lÃª...)
-   - Atmosphere & Environmental mood (Báº§u khÃ´ng khÃ­: SÆ°Æ¡ng mÃ¹ huyá»n bÃ­, Bá»¥i bay lÆ¡ lá»­ng trong váº¡t náº¯ng, Ãnh náº¿n lung linh...)
-   - Depth of field (Äá»™ sÃ¢u trÆ°á»ng áº£nh DOF, Bokeh)
-3. Lighting & Illumination (Ãnh sÃ¡ng: hÆ°á»›ng sÃ¡ng, nguá»“n sÃ¡ng, nhiá»‡t Ä‘á»™ mÃ u, Ä‘á»™ gáº¯t/dá»‹u, bÃ³ng Ä‘á»• Chiaroscuro...)
-4. Camera & Optical Composition (GÃ³c mÃ¡y, bá»‘ cá»¥c, tiÃªu cá»± á»‘ng kÃ­nh Ä‘á» xuáº¥t, kháº©u Ä‘á»™)
-5. Color Palette & Mood (Báº£ng mÃ u chá»§ Ä‘áº¡o, cÃ¡c mÃ£ HEX ná»•i báº­t, tÃ´ng cáº£m xÃºc, Color grading)
-6. Subject & Textures (Chá»§ thá»ƒ, tháº§n thÃ¡i, cháº¥t liá»‡u bá» máº·t)
-7. Modular Prompt Snippets (Tá»«ng máº£nh ghÃ©p prompt Ä‘á»™c láº­p Ä‘á»ƒ ngÆ°á»i dÃ¹ng cÃ³ thá»ƒ tÃ¹y Ã½ tÃ­ch chá»n tá»«ng pháº§n ghÃ©p vÃ o prompt):
+1. Overall Art Style & Aesthetic (Phong cách tổng thể)
+2. In-Depth Background & Environment Breakdown (Phân tích bối cảnh cực kỳ chi tiết):
+   - Setting type (ví dụ: Lâu đài cổ Gothic Châu Âu, Biệt thự cổ điển, Studio tối giản, Loft tường xi măng mộc...)
+   - Architectural style (Phong cách kiến trúc, vòm cửa, cột trụ, ban công...)
+   - Objects and Props (Liệt kê tỉ mỉ mọi đồ vật, đạo cụ)
+   - Materials & Textures (Xi măng thô, Đá cổ phong hóa, Gỗ sồi mộc, Kim loại đồng gỉ, Thủy tinh pha lê...)
+   - Atmosphere & Environmental mood (Sương mù huyền bí, Bụi bay lơ lửng trong vạt nắng, Ánh nến lung linh...)
+   - Depth of field (�ộ sâu trường ảnh DOF, Bokeh)
+3. Lighting & Illumination (Ánh sáng: hướng sáng, nguồn sáng, nhiệt độ màu, độ gắt/dịu, bóng đ� Chiaroscuro...)
+4. Camera & Optical Composition (Góc máy, bố cục, tiêu cự ống kính đề xuất, khẩu độ)
+5. Color Palette & Mood (Bảng màu chủ đạo, các mã HEX nổi bật, tông cảm xúc, Color grading)
+6. Subject & Textures (Chủ thể, thần thái, chất liệu bề mặt)
+7. Modular Prompt Snippets (Từng mảnh ghép prompt độc lập):
    - Background prompt snippet (English & Vietnamese)
    - Lighting prompt snippet (English & Vietnamese)
    - Camera prompt snippet (English & Vietnamese)
@@ -388,83 +358,314 @@ Analyze the provided image in comprehensive, professional detail for the followi
    - negativePrompt: Optimal negative prompt to eliminate visual flaws.
    - suggestedAspectRatio: One of ["1:1", "16:9", "9:16", "4:3", "3:2"]
 
-${userFocus ? `User specific focus request: "${userFocus}"` : ''}
-
-Respond strictly in JSON format matching the schema.
+Return STRICTLY a JSON object matching the required schema. No prose, no markdown fences, ONLY valid JSON.
 `;
 
-    let response: any = null;
-    let usedModel = 'gemini-3.7-flash';
+// --- PROVIDER-SPECIFIC ANALYSIS CALLS ---
 
-    // 1. Try gemini-3.7-flash first
-    try {
-      response = await ai.models.generateContent({
-        model: 'gemini-3.7-flash',
-        contents: {
-          parts: [
+async function analyzeWithGemini(opts: {
+  apiKey: string;
+  model: string;
+  imageBase64: string;
+  mimeType: string;
+  userFocus?: string | null;
+}): Promise<{ analysis: any; source: string }> {
+  const ai = new GoogleGenAI({
+    apiKey: opts.apiKey,
+    httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
+  });
+  const cleanBase64 = opts.imageBase64.replace(/^data:image\/[a-zA-Z0-9+]+;base64,/, '');
+  const finalPrompt = opts.userFocus
+    ? `${ANALYSIS_PROMPT_TEXT}\n\nUser specific focus request: "${opts.userFocus}"`
+    : ANALYSIS_PROMPT_TEXT;
+
+  let response: any = null;
+  let usedModel = opts.model;
+
+  try {
+    response = await ai.models.generateContent({
+      model: opts.model,
+      contents: {
+        parts: [
+          {
+            inlineData: {
+              mimeType: opts.mimeType || 'image/jpeg',
+              data: cleanBase64,
+            },
+          },
+          { text: finalPrompt },
+        ],
+      },
+      config: {
+        systemInstruction:
+          'You are a world-class cinematographer and AI art director. Provide exceptionally deep visual analysis in Vietnamese with modular prompt snippets.',
+        responseMimeType: 'application/json',
+        responseSchema: ANALYSIS_RESPONSE_SCHEMA,
+      },
+    });
+  } catch (primaryErr: any) {
+    console.warn(`Gemini model ${opts.model} failed:`, primaryErr?.message);
+    response = null;
+  }
+
+  if (response && response.text) {
+    const resultJson = JSON.parse(response.text || '{}');
+    return { analysis: resultJson, source: usedModel };
+  }
+  throw new Error(`Gemini model ${opts.model} did not return a valid response.`);
+}
+
+async function analyzeWithOpenAI(opts: {
+  apiKey: string;
+  model: string;
+  apiEndpoint?: string | null;
+  imageBase64: string;
+  mimeType: string;
+  userFocus?: string | null;
+}): Promise<{ analysis: any; source: string }> {
+  const endpoint =
+    (opts.apiEndpoint?.replace(/\/$/, '') || 'https://api.openai.com/v1') + '/chat/completions';
+  const cleanBase64 = opts.imageBase64.replace(/^data:image\/[a-zA-Z0-9+]+;base64,/, '');
+  const dataUrl = `data:${opts.mimeType || 'image/jpeg'};base64,${cleanBase64}`;
+  const finalPrompt = opts.userFocus
+    ? `${ANALYSIS_PROMPT_TEXT}\n\nUser specific focus request: "${opts.userFocus}"`
+    : ANALYSIS_PROMPT_TEXT;
+
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${opts.apiKey}`,
+    },
+    body: JSON.stringify({
+      model: opts.model,
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You are a world-class cinematographer and AI art director. Respond ONLY with a single valid JSON object matching the schema. No prose, no markdown.',
+        },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: finalPrompt },
+            { type: 'image_url', image_url: { url: dataUrl } },
+          ],
+        },
+      ],
+      response_format: { type: 'json_object' },
+      max_tokens: 4096,
+    }),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text().catch(() => '');
+    throw new Error(`OpenAI analyze failed (${response.status}): ${errText.slice(0, 300)}`);
+  }
+  const data: any = await response.json();
+  const content = data?.choices?.[0]?.message?.content;
+  if (!content) throw new Error('OpenAI returned empty content.');
+  const analysis = typeof content === 'string' ? JSON.parse(content) : content;
+  return { analysis, source: opts.model };
+}
+
+async function analyzeWithAnthropic(opts: {
+  apiKey: string;
+  model: string;
+  apiEndpoint?: string | null;
+  imageBase64: string;
+  mimeType: string;
+  userFocus?: string | null;
+}): Promise<{ analysis: any; source: string }> {
+  const endpoint =
+    (opts.apiEndpoint?.replace(/\/$/, '') || 'https://api.anthropic.com') + '/v1/messages';
+  const cleanBase64 = opts.imageBase64.replace(/^data:image\/[a-zA-Z0-9+]+;base64,/, '');
+  const finalPrompt = opts.userFocus
+    ? `${ANALYSIS_PROMPT_TEXT}\n\nUser specific focus request: "${opts.userFocus}"`
+    : ANALYSIS_PROMPT_TEXT;
+
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': opts.apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify({
+      model: opts.model,
+      max_tokens: 4096,
+      system:
+        'You are a world-class cinematographer and AI art director. Respond ONLY with a single valid JSON object matching the schema. No prose, no markdown.',
+      messages: [
+        {
+          role: 'user',
+          content: [
             {
-              inlineData: {
-                mimeType: mimeType || 'image/jpeg',
+              type: 'image',
+              source: {
+                type: 'base64',
+                media_type: opts.mimeType || 'image/jpeg',
                 data: cleanBase64,
               },
             },
-            {
-              text: promptText,
-            },
+            { type: 'text', text: finalPrompt },
           ],
         },
-        config: {
-          systemInstruction:
-            'You are a world-class cinematographer and AI art director. Provide exceptionally deep, evocative visual analysis in Vietnamese with modular and master English/Vietnamese prompt snippets.',
-          responseMimeType: 'application/json',
-          responseSchema: ANALYSIS_RESPONSE_SCHEMA,
-        },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text().catch(() => '');
+    throw new Error(`Anthropic analyze failed (${response.status}): ${errText.slice(0, 300)}`);
+  }
+  const data: any = await response.json();
+  const textBlock = (data?.content || []).find((b: any) => b.type === 'text');
+  const content = textBlock?.text;
+  if (!content) throw new Error('Anthropic returned empty content.');
+  const jsonMatch = content.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error('Anthropic response did not contain a JSON object.');
+  const analysis = JSON.parse(jsonMatch[0]);
+  return { analysis, source: opts.model };
+}
+
+// --- ZOD INPUT VALIDATION SCHEMAS ---
+
+const analyzeStyleSchema = z.object({
+  imageBase64: z.string().min(1, 'Ảnh phân tích không được để trống'),
+  mimeType: z.string().max(100).optional().default('image/jpeg'),
+  userFocus: z.string().max(2000).optional().nullable(),
+  provider: z.enum(['gemini', 'openai', 'anthropic']).optional().default('gemini'),
+  model: z.string().max(150).optional().nullable(),
+  apiKey: z.string().max(500).optional().nullable(),
+  apiEndpoint: z.string().max(500).optional().nullable(),
+});
+
+const generateImageSchema = z.object({
+  prompt: z
+    .string()
+    .min(1, 'Prompt không được để trống')
+    .max(4000, 'Prompt không được vượt quá 4000 ký tự'),
+  negativePrompt: z.string().max(2000).optional().nullable(),
+  aspectRatio: z
+    .enum(['original', '1:1', '16:9', '9:16', '4:3', '3:2', '21:9', '3:4', '2:3'])
+    .default('1:1'),
+  variations: z.number().int().min(1, 'Tối thiểu 1 biến thể').max(4, 'Tối đa 4 biến thể').default(1),
+  quality: z.enum(['standard', 'high', 'raw']).optional().default('high'),
+  seed: z.string().max(50).optional().default('-1'),
+  model: z.string().max(150).optional().nullable(),
+  provider: z.enum(['gemini', 'openai', 'anthropic']).optional().default('gemini'),
+  apiKey: z.string().max(500).optional().nullable(),
+  apiEndpoint: z.string().max(500).optional().nullable(),
+  sourceImageBase64: z.string().optional().nullable(),
+  referenceImageBase64: z.string().optional().nullable(),
+});
+
+// Helper: validate custom endpoint hostname against allowlist (SSRF guard)
+function validateCustomEndpoint(rawEndpoint: string, provider: string): { ok: boolean; hostname?: string; error?: string } {
+  // Gemini uses SDK with key; customEndpoint not used by SDK — skip allowlist entirely for gemini.
+  if (provider === 'gemini') return { ok: true };
+
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(rawEndpoint);
+  } catch {
+    return { ok: false, error: 'apiEndpoint không phải là một URL hợp lệ.' };
+  }
+  const hostname = parsedUrl.hostname.toLowerCase();
+  const isAllowed = OPENAI_ALLOWED_DOMAINS.some(
+    (allowed) => hostname === allowed || hostname.endsWith(`.${allowed}`)
+  );
+  if (!isAllowed) {
+    return {
+      ok: false,
+      error: `Tên miền endpoint '${hostname}' không nằm trong danh sách được phép. Chỉ cho phép: ${OPENAI_ALLOWED_DOMAINS.join(', ')}`,
+    };
+  }
+  return { ok: true, hostname };
+}
+
+// Endpoint: AI Image Style, Background, Lighting & Composition Analyzer (multi-provider)
+app.post('/api/gemini/analyze-style', aiLimiter, async (req, res) => {
+  try {
+    const parsed = analyzeStyleSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        error: 'Dữ liệu đầu vào không hợp lệ',
+        details: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join(', '),
       });
-    } catch (primaryErr: any) {
-      console.warn('gemini-3.7-flash busy/unavailable, trying gemini-3.1-flash-lite fallback:', primaryErr?.message);
-      // 2. Try gemini-3.1-flash-lite fallback
-      try {
-        usedModel = 'gemini-3.1-flash-lite';
-        response = await ai.models.generateContent({
-          model: 'gemini-3.1-flash-lite',
-          contents: {
-            parts: [
-              {
-                inlineData: {
-                  mimeType: mimeType || 'image/jpeg',
-                  data: cleanBase64,
-                },
-              },
-              {
-                text: promptText,
-              },
-            ],
-          },
-          config: {
-            systemInstruction:
-              'You are a world-class cinematographer and AI art director. Provide exceptionally deep visual analysis in Vietnamese with modular prompt snippets.',
-            responseMimeType: 'application/json',
-            responseSchema: ANALYSIS_RESPONSE_SCHEMA,
-          },
-        });
-      } catch (secondaryErr: any) {
-        console.warn('Secondary fallback model also encountered issue:', secondaryErr?.message);
+    }
+
+    const { provider = 'gemini', imageBase64, mimeType = 'image/jpeg', userFocus, model, apiKey, apiEndpoint } = parsed.data;
+
+    // Resolve effective key & model
+    const effectiveModel = (model && model.trim()) ||
+      (provider === 'gemini' ? 'gemini-3.7-flash' :
+        provider === 'anthropic' ? 'claude-3-5-sonnet-latest' : 'gpt-4o');
+
+    let effectiveKey = (apiKey && apiKey.trim()) || '';
+    if (!effectiveKey) {
+      if (provider === 'gemini') effectiveKey = process.env.GEMINI_API_KEY || '';
+    }
+    if (!effectiveKey) {
+      return res.status(200).json({
+        fallback: true,
+        message: `Chưa cấu hình API Key cho provider '${provider}'. Sử dụng visual engine tích hợp.`,
+      });
+    }
+
+    // Allowlist validation (only for non-gemini)
+    if (apiEndpoint) {
+      const v = validateCustomEndpoint(apiEndpoint, provider);
+      if (!v.ok) {
+        return res.status(400).json({ error: v.error, success: false });
       }
     }
 
-    if (response && response.text) {
-      const resultJson = JSON.parse(response.text || '{}');
-      return res.json({
-        success: true,
-        analysis: resultJson,
-        source: usedModel,
+    let result: { analysis: any; source: string };
+    try {
+      if (provider === 'gemini') {
+        result = await analyzeWithGemini({
+          apiKey: effectiveKey,
+          model: effectiveModel,
+          imageBase64,
+          mimeType,
+          userFocus,
+        });
+      } else if (provider === 'openai') {
+        result = await analyzeWithOpenAI({
+          apiKey: effectiveKey,
+          model: effectiveModel,
+          apiEndpoint,
+          imageBase64,
+          mimeType,
+          userFocus,
+        });
+      } else if (provider === 'anthropic') {
+        result = await analyzeWithAnthropic({
+          apiKey: effectiveKey,
+          model: effectiveModel,
+          apiEndpoint,
+          imageBase64,
+          mimeType,
+          userFocus,
+        });
+      } else {
+        return res.status(400).json({ error: `Provider không hợp lệ: ${provider}`, success: false });
+      }
+    } catch (providerErr: any) {
+      console.warn(`Analyze via ${provider} failed, fallback to visual engine:`, providerErr?.message);
+      return res.status(200).json({
+        fallback: true,
+        message: providerErr?.message || `Phân tích qua ${provider} thất bại. Đã chuyển sang visual engine.`,
       });
     }
 
-    // If both remote Gemini calls were throttled or unavailable, return fallback flag cleanly
-    return res.status(200).json({
-      fallback: true,
-      message: 'Gemini service is temporarily under high demand, utilizing intelligent visual engine.',
+    return res.json({
+      success: true,
+      analysis: result.analysis,
+      source: result.source,
     });
   } catch (error: any) {
     console.error('Error in analyze-style handler:', error);
@@ -493,13 +694,142 @@ function mapAspectRatioToStandard(ratio: string): '1:1' | '16:9' | '9:16' | '4:3
   }
 }
 
-// Endpoint: AI Image Generation (Gemini 3.1 Flash Image, Imagen 3, OpenAI, or Live Generative Engine)
+// --- IMAGE GENERATION PROVIDERS ---
+
+interface GenerateParams {
+  prompt: string;
+  negativePrompt?: string | null;
+  aspectRatio: '1:1' | '16:9' | '9:16' | '4:3' | '3:4';
+  variations: number;
+  quality: 'standard' | 'high' | 'raw';
+  seed: string;
+  sourceImageBase64?: string | null;
+  referenceImageBase64?: string | null;
+  apiKey: string;
+  apiEndpoint?: string | null;
+  model: string;
+}
+
+interface GeneratedVariant {
+  url: string;
+  seed: string;
+  modelUsed: string;
+}
+
+async function generateWithGemini(p: GenerateParams): Promise<GeneratedVariant[]> {
+  const ai = new GoogleGenAI({
+    apiKey: p.apiKey,
+    httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
+  });
+  const out: GeneratedVariant[] = [];
+  const baseSeed = p.seed && p.seed !== '-1' ? parseInt(p.seed, 10) : Math.floor(Math.random() * 900000) + 100000;
+
+  for (let i = 0; i < p.variations; i++) {
+    const itemSeed = (baseSeed + i * 1337).toString();
+    const parts: any[] = [];
+    if (p.sourceImageBase64) {
+      parts.push({
+        inlineData: {
+          mimeType: 'image/jpeg',
+          data: p.sourceImageBase64.replace(/^data:image\/[a-zA-Z0-9+]+;base64,/, ''),
+        },
+      });
+    }
+    if (p.referenceImageBase64) {
+      parts.push({
+        inlineData: {
+          mimeType: 'image/jpeg',
+          data: p.referenceImageBase64.replace(/^data:image\/[a-zA-Z0-9+]+;base64,/, ''),
+        },
+      });
+    }
+    parts.push({ text: p.prompt });
+
+    try {
+      const response = await ai.models.generateContent({
+        model: p.model,
+        contents: { parts },
+        config: {
+          imageConfig: { aspectRatio: p.aspectRatio },
+        },
+      });
+      const candidates = response.candidates;
+      if (candidates && candidates[0]?.content?.parts) {
+        for (const part of candidates[0].content.parts) {
+          if (part.inlineData?.data) {
+            const mime = part.inlineData.mimeType || 'image/png';
+            out.push({
+              url: `data:${mime};base64,${part.inlineData.data}`,
+              seed: itemSeed,
+              modelUsed: `Google Gemini ${p.model}`,
+            });
+            break;
+          }
+        }
+      }
+    } catch (err: any) {
+      console.warn(`Gemini generate (${p.model}) variant ${i} failed:`, err?.message);
+      throw err;
+    }
+  }
+  return out;
+}
+
+async function generateWithOpenAI(p: GenerateParams): Promise<GeneratedVariant[]> {
+  const endpoint =
+    (p.apiEndpoint?.replace(/\/$/, '') || 'https://api.openai.com/v1') + '/images/generations';
+  const sizeMap: Record<string, string> = {
+    '1:1': '1024x1024',
+    '16:9': '1792x1024',
+    '9:16': '1024x1792',
+    '4:3': '1024x1024',
+    '3:4': '1024x1024',
+  };
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${p.apiKey}`,
+    },
+    body: JSON.stringify({
+      model: p.model,
+      prompt: p.prompt,
+      n: p.variations,
+      size: sizeMap[p.aspectRatio] || '1024x1024',
+      quality: p.quality === 'standard' ? 'standard' : 'hd',
+    }),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text().catch(() => '');
+    throw new Error(`OpenAI generate failed (${response.status}): ${errText.slice(0, 300)}`);
+  }
+  const data: any = await response.json();
+  const baseSeed = p.seed && p.seed !== '-1' ? parseInt(p.seed, 10) : Math.floor(Math.random() * 900000) + 100000;
+  const out: GeneratedVariant[] = [];
+  if (Array.isArray(data?.data)) {
+    data.data.forEach((item: any, idx: number) => {
+      const url = item?.url || (item?.b64_json ? `data:image/png;base64,${item.b64_json}` : '');
+      if (url) {
+        out.push({
+          url,
+          seed: (baseSeed + idx * 941).toString(),
+          modelUsed: `OpenAI ${p.model}`,
+        });
+      }
+    });
+  }
+  if (out.length === 0) throw new Error('OpenAI did not return any image data.');
+  return out;
+}
+
+// Endpoint: AI Image Generation (multi-provider; no Pollinations fallback)
 app.post('/api/generate-image', aiLimiter, async (req, res) => {
   try {
     const parsed = generateImageSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({
-        error: 'Dá»¯ liá»‡u Ä‘áº§u vÃ o khÃ´ng há»£p lá»‡',
+        error: 'Dữ liệu đầu vào không hợp lệ',
         details: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join(', '),
         success: false,
       });
@@ -514,33 +844,39 @@ app.post('/api/generate-image', aiLimiter, async (req, res) => {
       seed = '-1',
       sourceImageBase64,
       referenceImageBase64,
-      customApiKey,
       provider = 'gemini',
-      customEndpoint,
+      apiKey,
+      apiEndpoint,
+      model,
     } = parsed.data;
 
-    // Validate customEndpoint domain against allowlist if provided
-    if (customEndpoint) {
-      try {
-        const parsedUrl = new URL(customEndpoint);
-        const hostname = parsedUrl.hostname.toLowerCase();
-        const isAllowed = OPENAI_ALLOWED_DOMAINS.some(
-          (allowed) => hostname === allowed || hostname.endsWith(`.${allowed}`)
-        );
+    // Anthropic does not support image generation
+    if (provider === 'anthropic') {
+      return res.status(400).json({
+        error: 'Anthropic không hỗ trợ sinh ảnh. Vui lòng chọn profile Gemini hoặc OpenAI.',
+        success: false,
+      });
+    }
 
-        if (!isAllowed) {
-          return res.status(400).json({
-            error: `TÃªn miá»n endpoint '${hostname}' khÃ´ng náº±m trong danh sÃ¡ch Ä‘Æ°á»£c phÃ©p. Chá»‰ cho phÃ©p cÃ¡c domain: ${OPENAI_ALLOWED_DOMAINS.join(
-              ', '
-            )}`,
-            success: false,
-          });
-        }
-      } catch (urlErr) {
-        return res.status(400).json({
-          error: 'customEndpoint khÃ´ng pháº£i lÃ  má»™t URL há»£p lá»‡.',
-          success: false,
-        });
+    // Resolve effective key & model
+    const effectiveModel = (model && model.trim()) ||
+      (provider === 'gemini' ? 'imagen-3.0-generate-002' : 'gpt-image-1');
+    let effectiveKey = (apiKey && apiKey.trim()) || '';
+    if (!effectiveKey) {
+      if (provider === 'gemini') effectiveKey = process.env.GEMINI_API_KEY || '';
+    }
+    if (!effectiveKey) {
+      return res.status(400).json({
+        error: `Chưa cấu hình API Key cho provider '${provider}'. Vui lòng thêm key trong Settings.`,
+        success: false,
+      });
+    }
+
+    // Allowlist validation
+    if (apiEndpoint) {
+      const v = validateCustomEndpoint(apiEndpoint, provider);
+      if (!v.ok) {
+        return res.status(400).json({ error: v.error, success: false });
       }
     }
 
@@ -549,167 +885,57 @@ app.post('/api/generate-image', aiLimiter, async (req, res) => {
     const fullPrompt = `${trimmedPrompt}${effectiveNegative}`;
     const mappedRatio = mapAspectRatioToStandard(aspectRatio);
     const count = Math.min(Math.max(Number(variations) || 1, 1), 4);
+
     const baseSeed = seed && seed !== '-1' ? parseInt(seed, 10) : Math.floor(Math.random() * 900000) + 100000;
 
-    const generatedImages: {
-      url: string;
-      seed: string;
-      modelUsed: string;
-      isFallbackEngine: boolean;
-    }[] = [];
+    let generatedImages: GeneratedVariant[] = [];
 
-    // 1. Try Gemini / Imagen if provider is gemini or default
-    const geminiKey = customApiKey || process.env.GEMINI_API_KEY;
-    if (provider === 'gemini' && geminiKey) {
-      const ai = new GoogleGenAI({
-        apiKey: geminiKey,
-        httpOptions: {
-          headers: {
-            'User-Agent': 'aistudio-build',
-          },
-        },
+    try {
+      if (provider === 'gemini') {
+        generatedImages = await generateWithGemini({
+          prompt: fullPrompt,
+          aspectRatio: mappedRatio,
+          variations: count,
+          quality,
+          seed,
+          sourceImageBase64,
+          referenceImageBase64,
+          apiKey: effectiveKey,
+          apiEndpoint,
+          model: effectiveModel,
+        });
+      } else if (provider === 'openai') {
+        generatedImages = await generateWithOpenAI({
+          prompt: fullPrompt,
+          aspectRatio: mappedRatio,
+          variations: count,
+          quality,
+          seed,
+          sourceImageBase64,
+          referenceImageBase64,
+          apiKey: effectiveKey,
+          apiEndpoint,
+          model: effectiveModel,
+        });
+      } else {
+        return res.status(400).json({ error: `Provider không hỗ trợ sinh ảnh: ${provider}`, success: false });
+      }
+    } catch (genErr: any) {
+      console.error(`Generate via ${provider} failed:`, genErr?.message);
+      return res.status(500).json({
+        error: genErr?.message || `Sinh ảnh qua ${provider} thất bại. Vui lòng thử lại hoặc đổi profile.`,
+        success: false,
       });
-
-      // Try generating requested variations
-      for (let i = 0; i < count; i++) {
-        const itemSeed = (baseSeed + i * 1337).toString();
-        let imageSuccess = false;
-
-        // Try gemini-3.1-flash-image with image editing/generation capability (paid tier)
-        try {
-          const parts: any[] = [];
-
-          if (sourceImageBase64) {
-            parts.push({
-              inlineData: {
-                mimeType: 'image/jpeg',
-                data: sourceImageBase64.replace(/^data:image\/[a-zA-Z0-9+]+;base64,/, ''),
-              },
-            });
-          }
-
-          if (referenceImageBase64) {
-            parts.push({
-              inlineData: {
-                mimeType: 'image/jpeg',
-                data: referenceImageBase64.replace(/^data:image\/[a-zA-Z0-9+]+;base64,/, ''),
-              },
-            });
-          }
-
-          parts.push({
-            text: fullPrompt,
-          });
-
-          const response = await ai.models.generateContent({
-            model: 'gemini-3.1-flash-image',
-            contents: { parts },
-            config: {
-              imageConfig: {
-                aspectRatio: mappedRatio,
-              },
-            },
-          });
-
-          const candidates = response.candidates;
-          if (candidates && candidates[0]?.content?.parts) {
-            for (const part of candidates[0].content.parts) {
-              if (part.inlineData?.data) {
-                const mime = part.inlineData.mimeType || 'image/png';
-                generatedImages.push({
-                  url: `data:${mime};base64,${part.inlineData.data}`,
-                  seed: itemSeed,
-                  modelUsed: 'Google Gemini 3.1 Flash Image',
-                  isFallbackEngine: false,
-                });
-                imageSuccess = true;
-                break;
-              }
-            }
-          }
-        } catch (flashErr: any) {
-          // Free tier has quota limit 0 for gemini-3.1-flash-image; fallback to synthesis engine
-          console.log('Gemini 3.1 flash image not available or quota limit 0, using fallback synthesis');
-        }
-      }
     }
 
-    // 2. If Custom OpenAI-compatible / DALL-E provider
-    if (provider === 'openai' && customApiKey) {
-      try {
-        const sizeMap: Record<string, string> = {
-          '1:1': '1024x1024',
-          '16:9': '1792x1024',
-          '9:16': '1024x1792',
-          '4:3': '1024x1024',
-          '3:2': '1792x1024',
-        };
-        const endpoint = customEndpoint || 'https://api.openai.com/v1/images/generations';
-        const response = await fetch(endpoint, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${customApiKey}`,
-          },
-          body: JSON.stringify({
-            model: 'dall-e-3',
-            prompt: fullPrompt,
-            n: 1,
-            size: sizeMap[mappedRatio] || '1024x1024',
-            quality: quality === 'raw' || quality === 'high' ? 'hd' : 'standard',
-          }),
-        });
-        const data = await response.json();
-        if (data.data && data.data[0]?.url) {
-          generatedImages.push({
-            url: data.data[0].url,
-            seed: baseSeed.toString(),
-            modelUsed: 'OpenAI DALL-E 3',
-            isFallbackEngine: false,
-          });
-        }
-      } catch (openAiErr: any) {
-        console.error('OpenAI generation error:', openAiErr?.message);
-      }
-    }
-
-    // 3. Fallback Engine (Pollinations): Used when primary Gemini and OpenAI are unavailable
-    // Transparently tagged with modelUsed and isFallbackEngine: true
     if (generatedImages.length === 0) {
-      let width = 1024;
-      let height = 1024;
-      if (mappedRatio === '16:9') {
-        width = 1280;
-        height = 720;
-      } else if (mappedRatio === '9:16') {
-        width = 720;
-        height = 1280;
-      } else if (mappedRatio === '4:3') {
-        width = 1152;
-        height = 864;
-      } else if (mappedRatio === '3:4') {
-        width = 864;
-        height = 1152;
-      }
-
-      for (let i = 0; i < count; i++) {
-        const itemSeed = baseSeed + i * 941;
-        // Construct neural synthesis URL from the user's exact prompt
-        const encodedPrompt = encodeURIComponent(
-          `${trimmedPrompt}, masterpiece, highly detailed, photorealistic, 8k resolution, cinematic lighting${
-            negativePrompt ? `, avoid ${negativePrompt}` : ''
-          }`
-        );
-        const liveAiUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&seed=${itemSeed}&nologo=true&enhance=true&model=flux`;
-
-        generatedImages.push({
-          url: liveAiUrl,
-          seed: itemSeed.toString(),
-          modelUsed: 'Public Fallback Engine (Pollinations)',
-          isFallbackEngine: true,
-        });
-      }
+      return res.status(500).json({
+        error: `Provider '${provider}' không trả về ảnh nào. Vui lòng thử lại hoặc đổi profile.`,
+        success: false,
+      });
     }
+
+    void baseSeed; // keep for future use
 
     return res.json({
       success: true,

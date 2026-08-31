@@ -1,38 +1,126 @@
 # Dự án: AI Image Studio (Công cụ chỉnh sửa ảnh AI tùy chỉnh)
 
+> Tài liệu này được cập nhật theo trạng thái code hiện tại. Xem `AIchangelog.md` để biết lịch sử công việc chi tiết.
+
 ## 1. Giới thiệu chung
-AI Image Studio là một công cụ chỉnh sửa hình ảnh đơn lẻ chất lượng cao, hoạt động dựa trên việc tích hợp và gọi các API AI tùy chỉnh. Ứng dụng hỗ trợ người dùng tinh chỉnh hình ảnh chuyên sâu, phân tích prompt thông minh và có khả năng xuất file trực tiếp vào Google Drive. Toàn bộ giao diện được thiết kế chuyên nghiệp, trực quan và sử dụng 100% ngôn ngữ tiếng Việt.
+AI Image Studio (tên gọi khác: **HinhanhAI**) là một công cụ chỉnh sửa hình ảnh AI chất lượng cao, tích hợp và gọi các API AI tùy chỉnh. Ứng dụng hỗ trợ phân tích prompt thông minh, sinh ảnh, và xuất file trực tiếp lên Google Drive. Toàn bộ giao diện bằng tiếng Việt, phong cách "editorial minimal".
 
-## 2. Các tính năng cốt lõi (Theo yêu cầu)
+## 2. Công nghệ / Stack
+- **Frontend:** React 19 + TypeScript + Vite 6 + Tailwind CSS 4 (`@tailwindcss/vite`), `lucide-react`, `motion`.
+- **Backend:** Express 4, chạy chung server với Vite (middleware mode khi dev; serve `dist/` khi production).
+- **Auth:** JWT (12h), mật khẩu qua biến môi trường `APP_PASSWORD`; cookie httpOnly + Bearer token.
+- **AI:** `@google/genai` (Gemini), gọi OpenAI/Anthropic qua `fetch` (OpenAI-compatible / Anthropic API).
+- **Google Drive:** OAuth token flow (GIS `gsi/client`), Drive API v3.
+- **Lưu trữ client:** `localStorage` (cài đặt + lịch sử).
+- **Bundler/runner:** `tsx` (dev), `esbuild` (bundle server), `bun.lock` + `npm` scripts.
 
-### 2.1. Khu vực Chỉnh sửa (Editor)
-- **Quản lý file đầu vào:** Hỗ trợ tải "Ảnh Gốc" (bắt buộc để xử lý) và "Ảnh Mẫu" (tùy chọn để tham khảo phong cách).
-- **Phân tích AI & Trích xuất Prompt:** Tính năng tự động đọc hiểu ảnh mẫu và viết ra một câu lệnh (prompt) chuẩn chỉnh, ngôn ngữ dễ hiểu cho AI, bao gồm đầy đủ các keyword chuyên nghiệp.
-- **Tùy chỉnh thông số đầu ra:**
-  - Cài đặt số lượng ảnh cần tạo (batch size từ 1 đến 4 biến thể).
-  - Tùy chọn: **Giữ nguyên cấu trúc chủ thể** (đảm bảo không thay đổi gương mặt, hình thể, quần áo, vị trí... thông qua các công nghệ như ControlNet hoặc IP-Adapter).
-  - Tùy chọn: **Giữ tỷ lệ khung hình gốc** của bức ảnh.
-- **Quy trình duyệt và lưu ảnh:**
-  - Giao diện chờ tạo ảnh (loading) chuyên nghiệp.
-  - Hiển thị kết quả dạng lưới để người dùng so sánh.
-  - Cho phép người dùng click chọn 1 bức ảnh ưng ý nhất (chốt hình).
-  - Có nút **"Chưa ưng ý, tạo lại"** để bắt đầu lại quy trình.
-  - Nút **"Chốt hình & Lưu lên Drive"** để tải file ảnh chất lượng cao trực tiếp vào Google Drive.
+## 3. Các tính năng cốt lõi
 
-### 2.2. Bảng điều khiển (Dashboard)
-- Quản lý hạn mức sử dụng (Token Limit) và Số Token đã sử dụng (Token Used) trực quan qua thanh tiến trình (Progress bar).
-- Thống kê tổng số lượng hình ảnh đã được tạo ra.
-- Bảng ước tính chi phí API chi tiết (So sánh giữa chi phí xử lý thường và chi phí khi bật ControlNet giữ nguyên chủ thể).
-- Theo dõi thông tin lưu trữ Google Drive (Trạng thái kết nối, dung lượng dự kiến tiêu tốn cho mỗi ảnh, tổng dung lượng đã lưu).
+### 3.1. Khu vực Chỉnh sửa (Editor)
+- Tải **Ảnh Gốc** (bắt buộc) và **Ảnh Mẫu** (tùy chọn, để tham khảo phong cách).
+- **Phân tích AI & Trích xuất Prompt** (Style Analyzer): đọc hiểu ảnh mẫu, xuất prompt chuẩn (EN/VI), negative prompt, gợi ý tỷ lệ khung hình; cho phép ghép prompt theo module (style/background/lighting/camera/colors/subject).
+- Tùy chỉnh đầu ra: số biến thể (1–4), tỷ lệ khung hình, chất lượng, negative prompt, seed, CFG.
+- Quy trình duyệt & lưu: grid so sánh → chọn 1 ảnh → "Chốt hình & Lưu lên Drive" hoặc "Tạo lại".
+- Lịch sử tự lưu vào `localStorage`.
 
-### 2.3. Lịch sử (History)
-- Tự động lưu trữ lịch sử các lần chỉnh sửa hình ảnh.
-- Lưu lại các tham số (Prompt, thời gian tạo) vào bộ nhớ cục bộ nhằm tiết kiệm dung lượng, hiển thị trực quan dạng lưới để dễ dàng xem lại.
+### 3.2. Bảng điều khiển (Dashboard)
+- Hiện là **số liệu tĩnh/mock** (chưa nối dữ liệu thật): tổng ảnh, credits, render time, Drive sync, phân bổ model, activity logs.
 
-### 2.4. Cài đặt hệ thống (Settings)
-- **Cấu hình API Tùy chỉnh:** Giao diện cho phép người dùng tự điền Endpoint URL và API Key của nhà cung cấp. API Key được lưu trữ bảo mật cục bộ trên trình duyệt.
-- **Kết nối Google Drive:** Nút kết nối Google (OAuth) để cấp quyền cho ứng dụng tự động upload ảnh xuất ra lên bộ nhớ Drive của người dùng.
+### 3.3. Lịch sử (History)
+- Lưu `localStorage` (key `hinhanhai_history_v2`, tối đa 100 mục), dạng lưới, có lightbox, tải về, lưu Drive, xóa.
 
-### 2.5. Bảo mật & Xác thực (Đăng nhập)
-- **Màn hình đăng nhập (Login):** Ứng dụng được bảo vệ bởi một lớp đăng nhập cơ bản trước khi truy cập vào không gian làm việc.
-- **Biến môi trường Vercel:** Mật khẩu đăng nhập được quản lý thông qua biến môi trường (`VITE_APP_PASSWORD`). Khi deploy lên Vercel, người dùng chỉ cần thiết lập biến môi trường này để thay đổi mật khẩu truy cập. Cấu hình xác thực Google OAuth sẽ được dời lại và thiết lập sau khi dự án chạy production.
+### 3.4. Cài đặt (Settings)
+- **Quản lý API Profiles** (đa provider, mỗi profile có vai trò riêng — xem mục 4).
+- **Google Drive:** kết nối OAuth, thư mục đích, auto-sync.
+- **Giao diện:** theme sáng/tối.
+- **Defaults:** chất lượng, tỷ lệ, số biến thể mặc định.
+
+### 3.5. Bảo mật & Xác thực
+- Màn hình Login, mật khẩu qua biến môi trường `APP_PASSWORD` (server-side).
+- JWT secret qua biến `JWT_SECRET`.
+- **Production bắt buộc** có `APP_PASSWORD` và `JWT_SECRET`, nếu thiếu server **crash ngay** (exit 1) kèm log rõ ràng.
+
+## 4. Kiến trúc Multi-Provider (ĐÃ TRIỂN KHAI — chờ commit/push)
+> Refactor hoàn tất ở local; đã `npm run lint` + `npm run build` pass. Chờ commit/push lên remote (gộp với bản sửa encoding).
+
+### 4.1. Mô hình provider mới
+- **Provider:** chỉ còn 3 loại: `gemini` | `openai` | `anthropic`.
+- **Mặc định:** 1 profile `gemini` duy nhất (có thể đổi API key trong Settings).
+- **Custom API:** người dùng tự tạo profile, **bắt buộc chọn chuẩn** là `openai` hoặc `anthropic`.
+- **Mỗi profile chọn model cụ thể** cho từng vai trò:
+  - `renderModel`: model dùng để **sinh ảnh** (render).
+  - `analyzeModel`: model dùng để **phân tích ảnh mẫu** (analyze).
+- **Vai trò (role):** `render` | `analyze` | `both` — xác định profile dùng để làm gì.
+- **Quy tắc Anthropic:** KHÔNG hỗ trợ render (sinh ảnh) — UI chặn không cho chọn vai trò render; backend trả lỗi nếu cố gọi render bằng Anthropic.
+- **Hai "engine" riêng biệt:**
+  - `renderProfileId`: profile dùng để sinh ảnh (role `render`/`both`).
+  - `analyzeProfileId`: profile dùng để phân tích ảnh mẫu (role `analyze`/`both`).
+
+### 4.2. Quyết định thiết kế đã chốt (theo câu hỏi với người dùng)
+1. Gemini mặc định: **hiển thị trong Settings, người dùng đổi được key**.
+2. Anthropic + render: **chặn** (disable/không cho chọn render).
+3. Fallback Pollinations: **bỏ hẳn** (không gửi prompt/ảnh ra dịch vụ bên ngoài; lỗi thì báo rõ).
+4. Chuẩn OpenAI: **cho phép nhập endpoint tùy ý** (OpenAI-compatible proxy), vẫn có allowlist domain chống SSRF.
+
+### 4.3. Luồng backend (đã triển khai)
+- `POST /api/generate-image`: nhận `provider` (`gemini`|`openai`|`anthropic`), `model` (renderModel), `apiKey`, `apiEndpoint`; route theo provider; Anthropic → lỗi 400 "không hỗ trợ sinh ảnh"; **không còn fallback Pollinations** — nếu tất cả variant fail → trả 500 với thông báo rõ.
+- `POST /api/gemini/analyze-style`: nhận `provider`, `model` (analyzeModel), `apiKey`, `apiEndpoint`; tách 3 hàm `analyzeWithGemini`/`OpenAI`/`Anthropic`; Gemini dùng `responseSchema` trực tiếp từ `ANALYSIS_RESPONSE_SCHEMA`, OpenAI/Anthropic ép JSON qua system prompt; trả `{ fallback: true }` nếu lỗi để client dùng visual engine nội bộ.
+
+## 5. Cấu hình / Biến môi trường
+Xem `.env.example`:
+- `GEMINI_API_KEY` — key Gemini (AI Studio có thể tự inject khi deploy lên AI Studio/Vercel).
+- `APP_PASSWORD` — mật khẩu đăng nhập (mặc định local: `admin`; production bắt buộc set).
+- `JWT_SECRET` — khóa ký JWT (production bắt buộc set; local có giá trị dev).
+- `OPENAI_ALLOWED_DOMAINS` — danh sách domain được phép cho endpoint OpenAI-compatible (chống SSRF). Mặc định: `api.openai.com,api.together.xyz,api.groq.com,openrouter.ai`.
+- `PORT` — cổng server (mặc định 3000).
+- Rate limit: `RATE_LIMIT_WINDOW_MS`, `RATE_LIMIT_MAX`, `AI_RATE_LIMIT_MAX`.
+
+## 6. Các endpoint chính (server.ts)
+- `GET /api/health` — public.
+- `POST /api/login` — đăng nhập, trả JWT (cookie httpOnly + token).
+- `POST /api/gemini/analyze-style` — phân tích ảnh mẫu (multi-provider: gemini/openai/anthropic).
+- `POST /api/generate-image` — sinh ảnh (multi-provider; bỏ fallback Pollinations).
+- Bảo vệ: tất cả `/api/*` ngoài health/login yêu cầu auth (Bearer hoặc cookie).
+
+## 7. Cấu trúc thư mục
+```
+server.ts                       # Express server + AI routing (multi-provider)
+src/
+  main.tsx                      # Root render + ErrorBoundary
+  App.tsx                       # Tab điều hướng + auth gate + theme
+  index.css                     # Tailwind + CSS vars light/dark
+  components/
+    ErrorBoundary.tsx
+    auth/LoginView.tsx
+    layout/Header.tsx
+    editor/EditorView.tsx, CanvasWorkspace.tsx, SourceUploader.tsx,
+           ReferenceUploader.tsx, PromptEditor.tsx, OutputSettings.tsx,
+           StyleAnalyzerModal.tsx, ImageLightbox.tsx
+    history/HistoryView.tsx
+    dashboard/DashboardView.tsx
+    settings/SettingsView.tsx
+  services/
+    storageService.ts           # v4 — multi-provider + role
+    authService.ts
+    imageGenerationService.ts   # multi-provider (no Pollinations)
+    styleAnalysisService.ts     # multi-provider analyze
+    historyService.ts
+    googleDriveService.ts
+  context/ThemeContext.tsx
+  types/index.ts
+```
+
+## 8. Lưu ý kỹ thuật / Cạm bẫy
+1. **Encoding UTF-8 rất quan trọng:** `server.ts` từng bị hỏng mojibake do dùng PowerShell `Get-Content`/`Set-Content` (mặc định ANSI). **KHÔNG dùng PowerShell để đọc/ghi file code** — chỉ dùng công cụ read/edit/write hoặc `node`. File code phải giữ UTF-8 không BOM.
+2. **Đã xảy ra** hỏng encoding trong commit `089b5cf` (500 chỗ mojibake); file đã được khôi phục từ bản sạch `e700579` và đang được tái cấu trúc.
+3. Fallback Pollinations (client + server) sẽ bị **xóa** theo quyết định thiết kế.
+4. `selectedModel` cũ → đổi thành `renderModel` + `analyzeModel` (đã xử lý normalize trong `storageService.loadAppSettings`).
+5. Custom headers (`customHeaders`) đang không dùng nữa trong model mới.
+6. Lỗi trắng trang khi phân tích ảnh mẫu trước đây do model fallback thiếu `responseSchema` — đã có giải pháp `ANALYSIS_RESPONSE_SCHEMA` dùng chung (đang áp lại) + ErrorBoundary (đã có).
+
+## 9. Trạng thái deploy / Kế hoạch
+- **Production đã deploy:** https://promtpicture.onrender.com/ (Render — giữ Express server, phù hợp với kiến trúc hiện tại).
+- **Local:** refactor multi-provider + sửa encoding đã xong; `npm run lint` + `npm run build` pass.
+- **Còn lại:** commit (gộp với bản sửa encoding để overwrite commit mojibake `089b5cf` trên remote) → push lên `main` → Render tự build bản mới.
+- Drive là nơi lưu ảnh xuất cuối (chưa có DB; lưu localStorage).
+- Lưu ý khi deploy Render: set đủ biến môi trường `APP_PASSWORD`, `JWT_SECRET`, `GEMINI_API_KEY`, `OPENAI_ALLOWED_DOMAINS`, `PORT`; build script dùng `npm run build` (vite build + esbuild server).

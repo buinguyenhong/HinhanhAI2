@@ -22,6 +22,7 @@ import {
   Sliders,
   Server,
   Zap,
+  Info,
 } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import {
@@ -30,49 +31,78 @@ import {
   AppSettings,
   ApiProfile,
   ApiProviderType,
-  getActiveProfile,
+  ApiProfileRole,
+  getAnalyzeProfile,
+  getRenderProfile,
 } from '../../services/storageService';
 import {
   authenticateWithGoogleDrive,
   disconnectGoogleDrive,
-  getStoredAccessToken,
-  getStoredUserEmail,
 } from '../../services/googleDriveService';
+
+const PROVIDER_PRESETS: Record<
+  ApiProviderType,
+  { endpoint: string; renderModel: string; analyzeModel: string; notes: string }
+> = {
+  gemini: {
+    endpoint: 'https://generativelanguage.googleapis.com',
+    renderModel: 'imagen-3.0-generate-002',
+    analyzeModel: 'gemini-3.7-flash',
+    notes: 'Google Gemini (mặc định) — dùng SDK với key. Hỗ trợ cả sinh ảnh và phân tích.',
+  },
+  openai: {
+    endpoint: 'https://api.openai.com/v1',
+    renderModel: 'gpt-image-1',
+    analyzeModel: 'gpt-4o',
+    notes: 'OpenAI / OpenAI-compatible proxy. Hỗ trợ cả sinh ảnh và phân tích.',
+  },
+  anthropic: {
+    endpoint: 'https://api.anthropic.com',
+    renderModel: '',
+    analyzeModel: 'claude-3-5-sonnet-latest',
+    notes: 'Anthropic — CHỈ phân tích ảnh. Không hỗ trợ sinh ảnh (UI sẽ chặn role render).',
+  },
+};
+
+const ROLE_OPTIONS: { value: ApiProfileRole; label: string; desc: string }[] = [
+  { value: 'both', label: 'Cả hai (Phân tích + Sinh ảnh)', desc: 'Dùng cho cả render và analyze.' },
+  { value: 'render', label: 'Chỉ sinh ảnh (Render)', desc: 'Chỉ dùng làm engine sinh ảnh.' },
+  { value: 'analyze', label: 'Chỉ phân tích ảnh mẫu', desc: 'Chỉ dùng để phân tích ảnh mẫu.' },
+];
 
 export const SettingsView: React.FC = () => {
   const { theme, setTheme } = useTheme();
   const [settings, setSettings] = useState<AppSettings>(loadAppSettings);
   const [savedSuccess, setSavedSuccess] = useState(false);
 
-  // Drive state
   const [showDriveConnectModal, setShowDriveConnectModal] = useState(false);
   const [driveEmailInput, setDriveEmailInput] = useState('');
 
-  // API testing state
   const [testingProfileId, setTestingProfileId] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<
     Record<string, { status: 'success' | 'error'; message: string; latency?: number }>
   >({});
 
-  // Modal / Form state for Add/Edit API Profile
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
   const [showModalApiKey, setShowModalApiKey] = useState(false);
 
-  // Profile Form Fields
+  // Profile Form Fields (new schema)
   const [formName, setFormName] = useState('');
-  const [formProvider, setFormProvider] = useState<ApiProviderType>('custom');
+  const [formProvider, setFormProvider] = useState<ApiProviderType>('openai');
+  const [formRole, setFormRole] = useState<ApiProfileRole>('both');
   const [formEndpoint, setFormEndpoint] = useState('');
   const [formApiKey, setFormApiKey] = useState('');
-  const [formModel, setFormModel] = useState('');
-  const [formHeaders, setFormHeaders] = useState('');
+  const [formRenderModel, setFormRenderModel] = useState('');
+  const [formAnalyzeModel, setFormAnalyzeModel] = useState('');
   const [formNotes, setFormNotes] = useState('');
 
   useEffect(() => {
     setSettings((prev) => ({ ...prev, theme }));
   }, [theme]);
 
-  const activeProfile = getActiveProfile(settings);
+  const renderProfile = getRenderProfile(settings);
+  const analyzeProfile = getAnalyzeProfile(settings);
 
   const handleUpdate = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
     setSettings((prev) => {
@@ -82,33 +112,33 @@ export const SettingsView: React.FC = () => {
     });
   };
 
-  const handleSelectActiveProfile = (profileId: string) => {
-    const profile = settings.apiProfiles.find((p) => p.id === profileId);
+  const handleSelectRenderProfile = (profileId: string) => {
+    const profile = settings.apiProfiles.find((p) => p.id === profileId && p.role !== 'analyze');
     if (!profile) return;
-    setSettings((prev) => {
-      const next = {
-        ...prev,
-        activeProfileId: profileId,
-        apiProvider: profile.provider,
-        apiKey: profile.apiKey,
-        apiEndpoint: profile.apiEndpoint,
-        selectedModel: profile.selectedModel,
-      };
-      saveAppSettings(next);
-      return next;
-    });
+    handleUpdate('renderProfileId', profileId);
+  };
+
+  const handleSelectAnalyzeProfile = (profileId: string) => {
+    const profile = settings.apiProfiles.find((p) => p.id === profileId && p.role !== 'render');
+    if (!profile) return;
+    handleUpdate('analyzeProfileId', profileId);
+  };
+
+  const resetForm = () => {
+    setEditingProfileId(null);
+    setFormName('');
+    setFormProvider('openai');
+    setFormRole('both');
+    setFormEndpoint(PROVIDER_PRESETS.openai.endpoint);
+    setFormApiKey('');
+    setFormRenderModel(PROVIDER_PRESETS.openai.renderModel);
+    setFormAnalyzeModel(PROVIDER_PRESETS.openai.analyzeModel);
+    setFormNotes(PROVIDER_PRESETS.openai.notes);
+    setShowModalApiKey(false);
   };
 
   const handleOpenAddModal = () => {
-    setEditingProfileId(null);
-    setFormName('');
-    setFormProvider('custom');
-    setFormEndpoint('https://api.yourdomain.com/v1/generate');
-    setFormApiKey('');
-    setFormModel('custom-sdxl-v1');
-    setFormHeaders('{\n  "Content-Type": "application/json"\n}');
-    setFormNotes('Custom API endpoint cá nhân');
-    setShowModalApiKey(false);
+    resetForm();
     setIsProfileModalOpen(true);
   };
 
@@ -116,31 +146,53 @@ export const SettingsView: React.FC = () => {
     setEditingProfileId(profile.id);
     setFormName(profile.name);
     setFormProvider(profile.provider);
+    setFormRole(profile.role);
     setFormEndpoint(profile.apiEndpoint);
     setFormApiKey(profile.apiKey || '');
-    setFormModel(profile.selectedModel);
-    setFormHeaders(profile.customHeaders || '');
+    setFormRenderModel(profile.renderModel);
+    setFormAnalyzeModel(profile.analyzeModel);
     setFormNotes(profile.notes || '');
     setShowModalApiKey(false);
     setIsProfileModalOpen(true);
+  };
+
+  const applyProviderPreset = (provider: ApiProviderType) => {
+    const preset = PROVIDER_PRESETS[provider];
+    setFormEndpoint(preset.endpoint);
+    setFormRenderModel(preset.renderModel);
+    setFormAnalyzeModel(preset.analyzeModel);
+    if (!formNotes) setFormNotes(preset.notes);
+  };
+
+  const handleProviderChange = (prov: ApiProviderType) => {
+    setFormProvider(prov);
+    applyProviderPreset(prov);
   };
 
   const handleSaveProfileForm = (e: React.FormEvent) => {
     e.preventDefault();
     if (!formName.trim()) return;
 
+    // Anthropic cannot have render role
+    const finalRole: ApiProfileRole =
+      formProvider === 'anthropic' && (formRole === 'render' || formRole === 'both')
+        ? 'analyze'
+        : formRole;
+
+    const sanitizedRenderModel = formProvider === 'anthropic' ? '' : formRenderModel.trim();
+
     if (editingProfileId) {
-      // Update existing
       const updatedProfiles = settings.apiProfiles.map((p) => {
         if (p.id === editingProfileId) {
           return {
             ...p,
             name: formName.trim(),
             provider: formProvider,
+            role: finalRole,
             apiEndpoint: formEndpoint.trim(),
             apiKey: formApiKey.trim(),
-            selectedModel: formModel.trim(),
-            customHeaders: formHeaders.trim(),
+            renderModel: sanitizedRenderModel,
+            analyzeModel: formAnalyzeModel.trim(),
             notes: formNotes.trim(),
           };
         }
@@ -148,26 +200,19 @@ export const SettingsView: React.FC = () => {
       });
 
       const nextSettings = { ...settings, apiProfiles: updatedProfiles };
-      // If currently active was edited, sync active fields
-      if (settings.activeProfileId === editingProfileId) {
-        nextSettings.apiProvider = formProvider;
-        nextSettings.apiKey = formApiKey.trim();
-        nextSettings.apiEndpoint = formEndpoint.trim();
-        nextSettings.selectedModel = formModel.trim();
-      }
       setSettings(nextSettings);
       saveAppSettings(nextSettings);
     } else {
-      // Create new profile
-      const newId = 'custom-' + Math.random().toString(36).substring(2, 9);
+      const newId = 'profile-' + Math.random().toString(36).substring(2, 9);
       const newProfile: ApiProfile = {
         id: newId,
         name: formName.trim(),
         provider: formProvider,
+        role: finalRole,
         apiEndpoint: formEndpoint.trim(),
         apiKey: formApiKey.trim(),
-        selectedModel: formModel.trim(),
-        customHeaders: formHeaders.trim(),
+        renderModel: sanitizedRenderModel,
+        analyzeModel: formAnalyzeModel.trim(),
         notes: formNotes.trim(),
         isCustom: true,
         createdAt: new Date().toISOString().split('T')[0],
@@ -176,12 +221,18 @@ export const SettingsView: React.FC = () => {
       const nextSettings = {
         ...settings,
         apiProfiles: [...settings.apiProfiles, newProfile],
-        activeProfileId: newId, // auto activate newly added
-        apiProvider: newProfile.provider,
-        apiKey: newProfile.apiKey,
-        apiEndpoint: newProfile.apiEndpoint,
-        selectedModel: newProfile.selectedModel,
       };
+
+      // Auto-pick first eligible if current IDs no longer valid
+      if (!nextSettings.apiProfiles.some((p) => p.id === nextSettings.renderProfileId && p.role !== 'analyze')) {
+        const fallback = nextSettings.apiProfiles.find((p) => p.role !== 'analyze');
+        if (fallback) nextSettings.renderProfileId = fallback.id;
+      }
+      if (!nextSettings.apiProfiles.some((p) => p.id === nextSettings.analyzeProfileId && p.role !== 'render')) {
+        const fallback = nextSettings.apiProfiles.find((p) => p.role !== 'render');
+        if (fallback) nextSettings.analyzeProfileId = fallback.id;
+      }
+
       setSettings(nextSettings);
       saveAppSettings(nextSettings);
     }
@@ -195,16 +246,17 @@ export const SettingsView: React.FC = () => {
       return;
     }
     const filtered = settings.apiProfiles.filter((p) => p.id !== profileId);
-    let newActiveId = settings.activeProfileId;
-    if (settings.activeProfileId === profileId) {
-      newActiveId = filtered[0].id;
+    const nextSettings: AppSettings = { ...settings, apiProfiles: filtered };
+
+    if (!filtered.some((p) => p.id === nextSettings.renderProfileId && p.role !== 'analyze')) {
+      const fallback = filtered.find((p) => p.role !== 'analyze');
+      if (fallback) nextSettings.renderProfileId = fallback.id;
+    }
+    if (!filtered.some((p) => p.id === nextSettings.analyzeProfileId && p.role !== 'render')) {
+      const fallback = filtered.find((p) => p.role !== 'render');
+      if (fallback) nextSettings.analyzeProfileId = fallback.id;
     }
 
-    const nextSettings = {
-      ...settings,
-      apiProfiles: filtered,
-      activeProfileId: newActiveId,
-    };
     setSettings(nextSettings);
     saveAppSettings(nextSettings);
   };
@@ -219,10 +271,9 @@ export const SettingsView: React.FC = () => {
 
     setTimeout(() => {
       setTestingProfileId(null);
-      const isGemini = profile.provider === 'gemini';
-      const hasKey = Boolean(profile.apiKey.trim());
+      const hasKey = Boolean(profile.apiKey.trim()) || profile.provider === 'gemini';
 
-      if (!hasKey && !isGemini) {
+      if (!hasKey) {
         setTestResults((prev) => ({
           ...prev,
           [profile.id]: {
@@ -236,7 +287,7 @@ export const SettingsView: React.FC = () => {
           ...prev,
           [profile.id]: {
             status: 'success',
-            message: `Hoạt động tốt • Endpoint phản hồi chuẩn • Độ trễ: ${randomLatency}ms`,
+            message: `Hoạt động tốt • Endpoint phản hồi chuẩn • Độ tr�: ${randomLatency}ms`,
             latency: randomLatency,
           },
         }));
@@ -270,32 +321,33 @@ export const SettingsView: React.FC = () => {
     setTimeout(() => setSavedSuccess(false), 2500);
   };
 
+  const renderProfiles = settings.apiProfiles.filter((p) => p.role !== 'analyze');
+  const analyzeProfiles = settings.apiProfiles.filter((p) => p.role !== 'render');
+
   return (
     <div className="max-w-3xl mx-auto space-y-12 pb-16 transition-colors">
-      {/* Top Header */}
       <div className="flex items-baseline justify-between border-b border-[#E2DDD5] dark:border-[#1D1D1B] pb-4">
         <div>
           <h2 className="text-xs uppercase tracking-[0.2em] font-medium text-[#1C1B18] dark:text-[#E8E7E2]">
-            Preferences & Multi-API Manager
+            Preferences & Multi-Provider Manager
           </h2>
           <p className="text-[10px] text-[#9C988F] dark:text-[#5E5D57] font-mono mt-0.5">
-            Quản lý danh sách API sinh & sửa ảnh (Custom API / Gemini / Flux), giao diện và Google Drive
+            Quản lý danh sách API (Gemini / OpenAI / Anthropic) với engine riêng cho Sinh ảnh & Phân tích ảnh mẫu
           </p>
         </div>
         <span className="text-[10px] font-mono text-[#6E6B64] dark:text-[#8C8B84]">
-          STUDIO BUILD v2.6
+          STUDIO BUILD v2.7
         </span>
       </div>
 
       <div className="space-y-10 text-xs">
-        {/* 1. Theme Configuration Section */}
+        {/* 1. Theme */}
         <div className="space-y-4">
           <h3 className="text-[10px] uppercase tracking-[0.2em] text-[#6E6B64] dark:text-[#8C8B84] font-mono border-b border-[#EDE9E1] dark:border-[#1D1D1B] pb-2">
             01 / Giao diện & Trực quan (Theme)
           </h3>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
-            {/* Light Mode Option */}
             <div
               onClick={() => setTheme('light')}
               className={`p-4 border transition-all cursor-pointer flex items-start gap-3.5 ${
@@ -322,7 +374,6 @@ export const SettingsView: React.FC = () => {
               </div>
             </div>
 
-            {/* Dark Mode Option */}
             <div
               onClick={() => setTheme('dark')}
               className={`p-4 border transition-all cursor-pointer flex items-start gap-3.5 ${
@@ -351,16 +402,93 @@ export const SettingsView: React.FC = () => {
           </div>
         </div>
 
-        {/* 2. MULTI-API PROFILE MANAGER & CUSTOM API SECTION */}
+        {/* 2. ACTIVE ENGINES (Render + Analyze) */}
+        <div className="space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#EDE9E1] dark:border-[#1D1D1B] pb-2">
+            <h3 className="text-[10px] uppercase tracking-[0.2em] text-[#6E6B64] dark:text-[#8C8B84] font-mono flex items-center gap-2">
+              <Zap size={12} />
+              02 / Engine đang sử dụng (Active Engines)
+            </h3>
+            <span className="text-[9px] font-mono text-[#9C988F] dark:text-[#5E5D57]">
+              2 engine tách biệt
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+            {/* Render engine */}
+            <div className="p-4 border border-[#1C1B18] dark:border-[#D8D3C5] bg-[#F5F3ED] dark:bg-[#151514] space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] uppercase tracking-wider font-mono text-[#9C988F] dark:text-[#5E5D57] flex items-center gap-1.5">
+                  <Zap size={11} /> Render Engine (Sinh ảnh)
+                </span>
+                <span className="text-[9px] font-mono uppercase px-1.5 py-0.2 bg-[#22C55E]/20 text-[#15803D] dark:text-[#4ADE80] font-semibold">
+                  ACTIVE
+                </span>
+              </div>
+              <p className="text-xs font-semibold text-[#1C1B18] dark:text-[#E8E7E2]">
+                {renderProfile.name}
+              </p>
+              <p className="text-[10px] font-mono text-[#6E6B64] dark:text-[#8C8B84] truncate">
+                {renderProfile.provider.toUpperCase()} • Model: {renderProfile.renderModel || '(chưa cấu hình)'}
+              </p>
+              <select
+                value={renderProfile.id}
+                onChange={(e) => handleSelectRenderProfile(e.target.value)}
+                disabled={renderProfiles.length === 0}
+                className="w-full bg-[#FFFFFF] dark:bg-[#0E0E0D] border border-[#E2DDD5] dark:border-[#292925] px-2 py-1.5 text-[10px] font-mono text-[#1C1B18] dark:text-[#E8E7E2] focus:outline-none cursor-pointer"
+              >
+                {renderProfiles.length === 0 && <option value="">(không có profile render)</option>}
+                {renderProfiles.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} — {p.renderModel || '(chưa có model)'}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Analyze engine */}
+            <div className="p-4 border border-[#1C1B18] dark:border-[#D8D3C5] bg-[#F5F3ED] dark:bg-[#151514] space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] uppercase tracking-wider font-mono text-[#9C988F] dark:text-[#5E5D57] flex items-center gap-1.5">
+                  <Eye size={11} /> Analyze Engine (Phân tích ảnh mẫu)
+                </span>
+                <span className="text-[9px] font-mono uppercase px-1.5 py-0.2 bg-[#22C55E]/20 text-[#15803D] dark:text-[#4ADE80] font-semibold">
+                  ACTIVE
+                </span>
+              </div>
+              <p className="text-xs font-semibold text-[#1C1B18] dark:text-[#E8E7E2]">
+                {analyzeProfile.name}
+              </p>
+              <p className="text-[10px] font-mono text-[#6E6B64] dark:text-[#8C8B84] truncate">
+                {analyzeProfile.provider.toUpperCase()} • Model: {analyzeProfile.analyzeModel || '(chưa cấu hình)'}
+              </p>
+              <select
+                value={analyzeProfile.id}
+                onChange={(e) => handleSelectAnalyzeProfile(e.target.value)}
+                disabled={analyzeProfiles.length === 0}
+                className="w-full bg-[#FFFFFF] dark:bg-[#0E0E0D] border border-[#E2DDD5] dark:border-[#292925] px-2 py-1.5 text-[10px] font-mono text-[#1C1B18] dark:text-[#E8E7E2] focus:outline-none cursor-pointer"
+              >
+                {analyzeProfiles.length === 0 && <option value="">(không có profile analyze)</option>}
+                {analyzeProfiles.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} — {p.analyzeModel || '(chưa có model)'}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {/* 3. API PROFILE MANAGER */}
         <div className="space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#EDE9E1] dark:border-[#1D1D1B] pb-2">
             <div>
               <h3 className="text-[10px] uppercase tracking-[0.2em] text-[#6E6B64] dark:text-[#8C8B84] font-mono flex items-center gap-2">
                 <Key size={12} />
-                02 / Danh sách API & Custom Endpoints ({settings.apiProfiles.length})
+                03 / Danh sách API Profiles ({settings.apiProfiles.length})
               </h3>
               <p className="text-[10px] text-[#9C988F] dark:text-[#5E5D57] font-mono mt-0.5">
-                Bạn có thể thêm nhiều API và chọn 1 API bất kỳ để kích hoạt sử dụng
+                Gemini mặc định • Thêm OpenAI / Anthropic với vai trò riêng
               </p>
             </div>
 
@@ -370,118 +498,84 @@ export const SettingsView: React.FC = () => {
               className="text-xs uppercase tracking-[0.14em] px-3.5 py-1.5 bg-[#1C1B18] hover:bg-[#2F2E2B] text-[#F8F7F4] dark:bg-[#D8D3C5] dark:hover:bg-[#E8E7E2] dark:text-[#0B0B0A] font-medium transition-colors flex items-center gap-1.5 cursor-pointer self-start sm:self-auto"
             >
               <Plus size={13} />
-              <span>Thêm API / Custom Endpoint</span>
+              <span>Thêm API Profile</span>
             </button>
           </div>
 
-          {/* Active API Banner */}
-          <div className="p-4 border border-[#1C1B18] dark:border-[#D8D3C5] bg-[#F5F3ED] dark:bg-[#151514] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-[#1C1B18] text-[#F8F7F4] dark:bg-[#D8D3C5] dark:text-[#0B0B0A] rounded-xs">
-                <Zap size={15} />
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] uppercase tracking-wider font-mono text-[#9C988F] dark:text-[#5E5D57]">
-                    API Đang sử dụng (Active Engine):
-                  </span>
-                  <span className="text-[9px] font-mono uppercase px-1.5 py-0.2 bg-[#22C55E]/20 text-[#15803D] dark:text-[#4ADE80] font-semibold">
-                    ĐANG HOẠT ĐỘNG
-                  </span>
-                </div>
-                <p className="text-xs font-semibold text-[#1C1B18] dark:text-[#E8E7E2] mt-0.5">
-                  {activeProfile.name}
-                  <span className="font-normal text-[#6E6B64] dark:text-[#8C8B84] text-[11px] ml-2 font-mono">
-                    ({activeProfile.selectedModel})
-                  </span>
-                </p>
-              </div>
-            </div>
-
-            <span className="text-[10px] font-mono text-[#6E6B64] dark:text-[#8C8B84] truncate max-w-xs">
-              {activeProfile.apiEndpoint}
-            </span>
-          </div>
-
-          {/* List of Configured API Profiles */}
           <div className="space-y-3 pt-1">
             {settings.apiProfiles.map((profile) => {
-              const isActive = profile.id === settings.activeProfileId;
+              const isRender = profile.id === settings.renderProfileId && profile.role !== 'analyze';
+              const isAnalyze = profile.id === settings.analyzeProfileId && profile.role !== 'render';
               const testResult = testResults[profile.id];
               const isTesting = testingProfileId === profile.id;
+              const isAnthropic = profile.provider === 'anthropic';
 
               return (
                 <div
                   key={profile.id}
                   className={`p-4 sm:p-5 border transition-all ${
-                    isActive
+                    isRender || isAnalyze
                       ? 'border-[#1C1B18] dark:border-[#D8D3C5] bg-[#FFFFFF] dark:bg-[#111110] shadow-sm'
                       : 'border-[#E2DDD5] dark:border-[#1D1D1B] bg-[#FFFFFF] dark:bg-[#111110] hover:border-[#CCC7BE] dark:hover:border-[#333330]'
                   }`}
                 >
                   <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-                    {/* Left: Info & Provider Badge */}
                     <div className="space-y-1.5 flex-1 min-w-0">
                       <div className="flex items-center gap-2.5 flex-wrap">
-                        {/* Radio selection */}
-                        <button
-                          type="button"
-                          onClick={() => handleSelectActiveProfile(profile.id)}
-                          className="flex items-center gap-2 cursor-pointer group text-left"
+                        <span
+                          className={`text-xs font-medium ${
+                            isRender || isAnalyze
+                              ? 'text-[#1C1B18] dark:text-[#E8E7E2] font-semibold'
+                              : 'text-[#6E6B64] dark:text-[#8C8B84]'
+                          }`}
                         >
-                          <div
-                            className={`w-4 h-4 rounded-full border flex items-center justify-center transition-colors ${
-                              isActive
-                                ? 'border-[#1C1B18] dark:border-[#D8D3C5] bg-[#1C1B18] dark:bg-[#D8D3C5]'
-                                : 'border-[#9C988F] group-hover:border-[#1C1B18] dark:group-hover:border-[#E8E7E2]'
-                            }`}
-                          >
-                            {isActive && (
-                              <div className="w-1.5 h-1.5 rounded-full bg-[#F8F7F4] dark:bg-[#0B0B0A]" />
-                            )}
-                          </div>
-                          <span
-                            className={`text-xs font-medium ${
-                              isActive
-                                ? 'text-[#1C1B18] dark:text-[#E8E7E2] font-semibold'
-                                : 'text-[#6E6B64] dark:text-[#8C8B84] group-hover:text-[#1C1B18] dark:group-hover:text-[#E8E7E2]'
-                            }`}
-                          >
-                            {profile.name}
-                          </span>
-                        </button>
-
-                        {/* Provider tag */}
-                        <span className="text-[9px] font-mono uppercase px-2 py-0.5 border border-[#E2DDD5] dark:border-[#292925] bg-[#F5F3ED] dark:bg-[#161614] text-[#6E6B64] dark:text-[#8C8B84]">
-                          {profile.provider === 'custom'
-                            ? 'CUSTOM ENDPOINT'
-                            : profile.provider.toUpperCase()}
+                          {profile.name}
                         </span>
 
-                        {isActive && (
-                          <span className="text-[9px] font-mono uppercase px-2 py-0.5 bg-[#1C1B18] text-[#F8F7F4] dark:bg-[#D8D3C5] dark:text-[#0B0B0A] font-semibold">
-                            ACTIVE
+                        <span className="text-[9px] font-mono uppercase px-2 py-0.5 border border-[#E2DDD5] dark:border-[#292925] bg-[#F5F3ED] dark:bg-[#161614] text-[#6E6B64] dark:text-[#8C8B84]">
+                          {profile.provider.toUpperCase()}
+                        </span>
+
+                        <span className="text-[9px] font-mono uppercase px-2 py-0.5 border border-[#E2DDD5] dark:border-[#292925] bg-[#F5F3ED] dark:bg-[#161614] text-[#6E6B64] dark:text-[#8C8B84]">
+                          {profile.role === 'render' ? 'Render' : profile.role === 'analyze' ? 'Analyze' : 'Both'}
+                        </span>
+
+                        {isRender && (
+                          <span className="text-[9px] font-mono uppercase px-2 py-0.5 bg-[#1C1B18] text-[#F8F7F4] dark:bg-[#D8D3C5] dark:text-[#0B0B0A] font-semibold flex items-center gap-1">
+                            <Zap size={9} /> RENDER
+                          </span>
+                        )}
+                        {isAnalyze && (
+                          <span className="text-[9px] font-mono uppercase px-2 py-0.5 bg-[#1C1B18] text-[#F8F7F4] dark:bg-[#D8D3C5] dark:text-[#0B0B0A] font-semibold flex items-center gap-1">
+                            <Eye size={9} /> ANALYZE
                           </span>
                         )}
                       </div>
 
-                      {/* Endpoint & Model details */}
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[10px] font-mono text-[#9C988F] dark:text-[#5E5D57] pt-1">
                         <div className="truncate flex items-center gap-1.5">
                           <Server size={11} className="shrink-0" />
                           <span className="text-[#6E6B64] dark:text-[#8C8B84]">Endpoint:</span>
-                          <span className="truncate">{profile.apiEndpoint}</span>
+                          <span className="truncate">{profile.apiEndpoint || '(mặc định SDK)'}</span>
                         </div>
+                        {!isAnthropic && (
+                          <div className="flex items-center gap-1.5">
+                            <Cpu size={11} className="shrink-0" />
+                            <span className="text-[#6E6B64] dark:text-[#8C8B84]">Render Model:</span>
+                            <span className="text-[#1C1B18] dark:text-[#E8E7E2]">
+                              {profile.renderModel || '—'}
+                            </span>
+                          </div>
+                        )}
                         <div className="flex items-center gap-1.5">
                           <Cpu size={11} className="shrink-0" />
-                          <span className="text-[#6E6B64] dark:text-[#8C8B84]">Model:</span>
+                          <span className="text-[#6E6B64] dark:text-[#8C8B84]">Analyze Model:</span>
                           <span className="text-[#1C1B18] dark:text-[#E8E7E2]">
-                            {profile.selectedModel}
+                            {profile.analyzeModel || '—'}
                           </span>
                         </div>
                       </div>
 
-                      {/* API Key mask */}
                       <div className="text-[10px] font-mono text-[#9C988F] dark:text-[#5E5D57] flex items-center gap-1.5">
                         <Key size={11} className="shrink-0" />
                         <span className="text-[#6E6B64] dark:text-[#8C8B84]">API Key:</span>
@@ -489,10 +583,17 @@ export const SettingsView: React.FC = () => {
                           {profile.apiKey
                             ? `••••••••••••${profile.apiKey.slice(-4)}`
                             : profile.provider === 'gemini'
-                            ? 'Auto GEMINI_API_KEY (AI Studio)'
+                            ? 'Auto GEMINI_API_KEY (server env)'
                             : 'Chưa cấu hình khóa'}
                         </span>
                       </div>
+
+                      {isAnthropic && (
+                        <p className="text-[10px] text-[#EAB308] dark:text-[#FACC15] italic pt-0.5 flex items-center gap-1">
+                          <Info size={11} />
+                          Anthropic chỉ hỗ trợ phân tích ảnh. Không thể dùng để sinh ảnh.
+                        </p>
+                      )}
 
                       {profile.notes && (
                         <p className="text-[10px] text-[#9C988F] dark:text-[#5E5D57] italic pt-0.5">
@@ -501,20 +602,29 @@ export const SettingsView: React.FC = () => {
                       )}
                     </div>
 
-                    {/* Right: Actions */}
                     <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
-                      {/* Activate Button if not active */}
-                      {!isActive && (
+                      {/* Quick pick as render */}
+                      {profile.role !== 'analyze' && !isAnthropic && !isRender && (
                         <button
                           type="button"
-                          onClick={() => handleSelectActiveProfile(profile.id)}
-                          className="px-3 py-1 text-[10px] uppercase font-mono border border-[#1C1B18] dark:border-[#D8D3C5] hover:bg-[#1C1B18] hover:text-[#F8F7F4] dark:hover:bg-[#D8D3C5] dark:hover:text-[#0B0B0A] text-[#1C1B18] dark:text-[#E8E7E2] transition-colors cursor-pointer"
+                          onClick={() => handleSelectRenderProfile(profile.id)}
+                          className="px-2 py-1 text-[10px] uppercase font-mono border border-[#E2DDD5] dark:border-[#292925] text-[#6E6B64] dark:text-[#8C8B84] hover:border-[#1C1B18] dark:hover:border-[#D8D3C5] hover:text-[#1C1B18] dark:hover:text-[#E8E7E2] transition-colors cursor-pointer flex items-center gap-1"
+                          title="Đặt làm engine Sinh ảnh"
                         >
-                          Chọn dùng
+                          <Zap size={10} /> Render
+                        </button>
+                      )}
+                      {profile.role !== 'render' && !isAnalyze && (
+                        <button
+                          type="button"
+                          onClick={() => handleSelectAnalyzeProfile(profile.id)}
+                          className="px-2 py-1 text-[10px] uppercase font-mono border border-[#E2DDD5] dark:border-[#292925] text-[#6E6B64] dark:text-[#8C8B84] hover:border-[#1C1B18] dark:hover:border-[#D8D3C5] hover:text-[#1C1B18] dark:hover:text-[#E8E7E2] transition-colors cursor-pointer flex items-center gap-1"
+                          title="Đặt làm engine Phân tích"
+                        >
+                          <Eye size={10} /> Analyze
                         </button>
                       )}
 
-                      {/* Test Connection Button */}
                       <button
                         type="button"
                         onClick={() => handleTestProfileConnection(profile)}
@@ -525,7 +635,6 @@ export const SettingsView: React.FC = () => {
                         <RefreshCw size={13} className={isTesting ? 'animate-spin' : ''} />
                       </button>
 
-                      {/* Edit Button */}
                       <button
                         type="button"
                         onClick={() => handleOpenEditModal(profile)}
@@ -535,7 +644,6 @@ export const SettingsView: React.FC = () => {
                         <Edit2 size={13} />
                       </button>
 
-                      {/* Delete Button */}
                       {profile.isCustom && (
                         <button
                           type="button"
@@ -549,7 +657,6 @@ export const SettingsView: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Test Result Message Box */}
                   {testResult && (
                     <div
                       className={`mt-3 text-[10px] font-mono px-3 py-1.5 border flex items-center gap-1.5 ${
@@ -572,20 +679,17 @@ export const SettingsView: React.FC = () => {
           </div>
         </div>
 
-        {/* 3. GOOGLE DRIVE SYNC SETTINGS */}
+        {/* 4. Google Drive */}
         <div className="space-y-4">
           <div className="flex items-center justify-between border-b border-[#EDE9E1] dark:border-[#1D1D1B] pb-2">
             <h3 className="text-[10px] uppercase tracking-[0.2em] text-[#6E6B64] dark:text-[#8C8B84] font-mono flex items-center gap-2">
               <HardDrive size={12} />
-              03 / Google Drive Sync & Storage
+              04 / Google Drive Sync & Storage
             </h3>
-            <span className="text-[9px] font-mono text-[#9C988F] dark:text-[#5E5D57]">
-              CLOUD BACKUP
-            </span>
+            <span className="text-[9px] font-mono text-[#9C988F] dark:text-[#5E5D57]">CLOUD BACKUP</span>
           </div>
 
           <div className="space-y-4 border border-[#E2DDD5] dark:border-[#1D1D1B] bg-[#FFFFFF] dark:bg-[#111110] p-5 sm:p-6">
-            {/* Status Header */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div className="flex items-center gap-3">
                 <div
@@ -642,7 +746,6 @@ export const SettingsView: React.FC = () => {
               </div>
             </div>
 
-            {/* Modal for connecting Drive */}
             {showDriveConnectModal && (
               <form
                 onSubmit={handleConnectDrive}
@@ -691,7 +794,6 @@ export const SettingsView: React.FC = () => {
               </form>
             )}
 
-            {/* Folder setting */}
             <div className="space-y-2 pt-2">
               <label className="block text-[10px] uppercase tracking-wider text-[#6E6B64] dark:text-[#8C8B84]">
                 Thư mục đích lưu ảnh trên Google Drive
@@ -705,7 +807,6 @@ export const SettingsView: React.FC = () => {
               />
             </div>
 
-            {/* Auto sync */}
             <div className="flex items-center justify-between pt-2">
               <div>
                 <p className="text-xs text-[#1C1B18] dark:text-[#E8E7E2]">Tự động đồng bộ khi tạo ảnh xong</p>
@@ -723,10 +824,10 @@ export const SettingsView: React.FC = () => {
           </div>
         </div>
 
-        {/* 4. STUDIO ENGINE DEFAULTS */}
+        {/* 5. DEFAULTS */}
         <div className="space-y-4">
-          <h3 className="text-[10px] uppercase tracking-[0.2em] text-[#6E6B64] dark:text-[#8C8B84] font-mono border-b border-[#EDE9E1] dark:border-[#1D1D1B] pb-2">
-            04 / Thông số mặc định khi khởi tạo (Defaults)
+          <h3 className="text-[10px] uppercase tracking-[0.2em] text-[#6E6B64] dark:text-[#8C8B84] font-mono border-b border-[#EDE9E1] dark:border-[#1D1D1D] pb-2">
+            05 / Thông số mặc định khi khởi tạo (Defaults)
           </h3>
 
           <div className="border border-[#E2DDD5] dark:border-[#1D1D1B] bg-[#FFFFFF] dark:bg-[#111110] p-5 sm:p-6 space-y-4">
@@ -765,10 +866,10 @@ export const SettingsView: React.FC = () => {
           </div>
         </div>
 
-        {/* 5. SECURITY STATUS */}
+        {/* 6. Security */}
         <div className="space-y-4">
           <h3 className="text-[10px] uppercase tracking-[0.2em] text-[#6E6B64] dark:text-[#8C8B84] font-mono border-b border-[#EDE9E1] dark:border-[#1D1D1B] pb-2">
-            05 / Bảo mật & Quản lý phiên làm việc
+            06 / Bảo mật & Quản lý phiên làm việc
           </h3>
 
           <div className="border border-[#E2DDD5] dark:border-[#1D1D1B] bg-[#FFFFFF] dark:bg-[#111110] p-5 sm:p-6 flex items-center justify-between">
@@ -779,7 +880,7 @@ export const SettingsView: React.FC = () => {
                   Bảo mật cục bộ (Local Encrypted Storage)
                 </p>
                 <p className="text-[10px] text-[#9C988F] dark:text-[#5E5D57]">
-                  Tất cả API Key, cấu hình Custom API và thông tin riêng tư được lưu an toàn trực tiếp trên trình duyệt của bạn
+                  Tất cả API Key và cấu hình được lưu an toàn trực tiếp trên trình duyệt của bạn
                 </p>
               </div>
             </div>
@@ -787,7 +888,7 @@ export const SettingsView: React.FC = () => {
           </div>
         </div>
 
-        {/* Action Save Bar */}
+        {/* Save Bar */}
         <div className="flex items-center justify-end gap-4 pt-4 border-t border-[#E2DDD5] dark:border-[#1D1D1B]">
           {savedSuccess && (
             <span className="text-[11px] font-mono text-[#15803D] dark:text-[#4ADE80] flex items-center gap-1.5">
@@ -805,7 +906,7 @@ export const SettingsView: React.FC = () => {
         </div>
       </div>
 
-      {/* MODAL / DRAWER: ADD OR EDIT API PROFILE */}
+      {/* MODAL: ADD/EDIT PROFILE */}
       {isProfileModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 sm:p-6 overflow-y-auto">
           <div className="w-full max-w-xl bg-[#F8F7F4] dark:bg-[#111110] border border-[#1C1B18] dark:border-[#D8D3C5] p-6 sm:p-8 space-y-6 shadow-2xl my-8">
@@ -813,10 +914,10 @@ export const SettingsView: React.FC = () => {
               <div>
                 <h3 className="text-xs uppercase tracking-[0.18em] font-medium text-[#1C1B18] dark:text-[#E8E7E2] flex items-center gap-2">
                   <Key size={14} />
-                  {editingProfileId ? 'Chỉnh sửa Cấu hình API' : 'Thêm Cấu hình API mới'}
+                  {editingProfileId ? 'Chỉnh sửa API Profile' : 'Thêm API Profile mới'}
                 </h3>
                 <p className="text-[10px] text-[#9C988F] dark:text-[#5E5D57] font-mono mt-0.5">
-                  Thiết lập endpoint, API Key và Model ID để tạo hoặc chỉnh sửa ảnh
+                  Chọn provider, vai trò và model riêng cho sinh ảnh & phân tích
                 </p>
               </div>
               <button
@@ -829,76 +930,84 @@ export const SettingsView: React.FC = () => {
             </div>
 
             <form onSubmit={handleSaveProfileForm} className="space-y-4 text-xs">
-              {/* Profile Name */}
               <div className="space-y-1.5">
                 <label className="block text-[10px] uppercase tracking-wider text-[#6E6B64] dark:text-[#8C8B84] font-medium">
-                  Tên hiển thị API (Profile Name) *
+                  Tên hiển thị (Profile Name) *
                 </label>
                 <input
                   type="text"
                   required
                   value={formName}
                   onChange={(e) => setFormName(e.target.value)}
-                  placeholder="Ví dụ: My RunPod ComfyUI, Personal Gemini Key, Stability Production..."
+                  placeholder="Ví dụ: My OpenAI Key, Personal Anthropic..."
                   className="w-full bg-[#FFFFFF] dark:bg-[#0E0E0D] border border-[#E2DDD5] dark:border-[#292925] p-2.5 text-xs text-[#1C1B18] dark:text-[#E8E7E2] focus:outline-none focus:border-[#1C1B18] dark:focus:border-[#5E5D57] transition-colors"
                 />
               </div>
 
-              {/* Provider Selection */}
               <div className="space-y-1.5">
                 <label className="block text-[10px] uppercase tracking-wider text-[#6E6B64] dark:text-[#8C8B84] font-medium">
-                  Loại nhà cung cấp (API Provider Type)
+                  Loại nhà cung cấp (Provider) *
                 </label>
                 <select
                   value={formProvider}
-                  onChange={(e) => {
-                    const prov = e.target.value as ApiProviderType;
-                    setFormProvider(prov);
-                    // auto preset suggestions
-                    if (prov === 'gemini') {
-                      setFormEndpoint('https://generativelanguage.googleapis.com');
-                      setFormModel('imagen-3.0-generate-002');
-                    } else if (prov === 'flux') {
-                      setFormEndpoint('https://api.bfl.ml/v1/flux-pro-1.1');
-                      setFormModel('flux.1-dev');
-                    } else if (prov === 'stability') {
-                      setFormEndpoint('https://api.stability.ai/v2beta/stable-image/generate/core');
-                      setFormModel('stable-diffusion-xl-1024-v1-0');
-                    } else if (prov === 'openai') {
-                      setFormEndpoint('https://api.openai.com/v1/images/generations');
-                      setFormModel('dall-e-3');
-                    }
-                  }}
+                  onChange={(e) => handleProviderChange(e.target.value as ApiProviderType)}
                   className="w-full bg-[#FFFFFF] dark:bg-[#0E0E0D] border border-[#E2DDD5] dark:border-[#292925] p-2.5 text-xs text-[#1C1B18] dark:text-[#E8E7E2] font-mono focus:outline-none focus:border-[#1C1B18] dark:focus:border-[#5E5D57] cursor-pointer"
                 >
-                  <option value="custom">Custom API (Self-Hosted / Proxy Gateway / ComfyUI)</option>
-                  <option value="gemini">Google Gemini & Imagen 3</option>
-                  <option value="flux">Flux.1 Dev / Schnell (Black Forest Labs)</option>
-                  <option value="stability">Stability AI (SDXL / Stable Image)</option>
-                  <option value="openai">OpenAI DALL·E 3 / Vision</option>
+                  <option value="gemini">Google Gemini & Imagen</option>
+                  <option value="openai">OpenAI / OpenAI-compatible</option>
+                  <option value="anthropic">Anthropic (chỉ phân tích ảnh)</option>
                 </select>
               </div>
 
-              {/* Base Endpoint */}
               <div className="space-y-1.5">
                 <label className="block text-[10px] uppercase tracking-wider text-[#6E6B64] dark:text-[#8C8B84] font-medium">
-                  API Base Endpoint URL *
+                  Vai trò (Role) *
+                </label>
+                <select
+                  value={formRole}
+                  onChange={(e) => setFormRole(e.target.value as ApiProfileRole)}
+                  className="w-full bg-[#FFFFFF] dark:bg-[#0E0E0D] border border-[#E2DDD5] dark:border-[#292925] p-2.5 text-xs text-[#1C1B18] dark:text-[#E8E7E2] font-mono focus:outline-none focus:border-[#1C1B18] dark:focus:border-[#5E5D57] cursor-pointer"
+                  disabled={formProvider === 'anthropic'}
+                >
+                  {ROLE_OPTIONS.map((opt) => (
+                    <option
+                      key={opt.value}
+                      value={opt.value}
+                      disabled={formProvider === 'anthropic' && opt.value !== 'analyze'}
+                    >
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-[#9C988F] dark:text-[#5E5D57] italic">
+                  {formProvider === 'anthropic'
+                    ? 'Anthropic chỉ hỗ trợ phân tích — role render/bị bỏ qua.'
+                    : 'Cả hai: dùng được cho cả sinh ảnh và phân tích.'}
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="block text-[10px] uppercase tracking-wider text-[#6E6B64] dark:text-[#8C8B84] font-medium">
+                  API Endpoint URL
                 </label>
                 <input
                   type="text"
-                  required
                   value={formEndpoint}
                   onChange={(e) => setFormEndpoint(e.target.value)}
-                  placeholder="https://api.domain.com/v1/generate hoặc http://127.0.0.1:8188/api"
+                  placeholder={PROVIDER_PRESETS[formProvider].endpoint}
                   className="w-full bg-[#FFFFFF] dark:bg-[#0E0E0D] border border-[#E2DDD5] dark:border-[#292925] p-2.5 text-xs text-[#1C1B18] dark:text-[#E8E7E2] font-mono focus:outline-none focus:border-[#1C1B18] dark:focus:border-[#5E5D57] transition-colors"
                 />
+                {formProvider !== 'gemini' && (
+                  <p className="text-[10px] text-[#9C988F] dark:text-[#5E5D57] italic">
+                    Endpoint phải nằm trong allowlist domain (OPENAI_ALLOWED_DOMAINS) để chống SSRF.
+                  </p>
+                )}
               </div>
 
-              {/* API Key */}
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <label className="text-[10px] uppercase tracking-wider text-[#6E6B64] dark:text-[#8C8B84] font-medium">
-                    API Key / Secret Token (Tùy chọn nếu proxy nội bộ)
+                    API Key / Secret Token
                   </label>
                   <button
                     type="button"
@@ -912,41 +1021,41 @@ export const SettingsView: React.FC = () => {
                   type={showModalApiKey ? 'text' : 'password'}
                   value={formApiKey}
                   onChange={(e) => setFormApiKey(e.target.value)}
-                  placeholder="AIzaSy... / sk-... / bearer token..."
+                  placeholder={formProvider === 'gemini' ? 'Để trống nếu muốn dùng GEMINI_API_KEY của server' : 'sk-... / API key...'}
                   className="w-full bg-[#FFFFFF] dark:bg-[#0E0E0D] border border-[#E2DDD5] dark:border-[#292925] p-2.5 text-xs text-[#1C1B18] dark:text-[#E8E7E2] font-mono focus:outline-none focus:border-[#1C1B18] dark:focus:border-[#5E5D57] transition-colors"
                 />
               </div>
 
-              {/* Model Name */}
+              {formProvider !== 'anthropic' && (
+                <div className="space-y-1.5">
+                  <label className="block text-[10px] uppercase tracking-wider text-[#6E6B64] dark:text-[#8C8B84] font-medium">
+                    Model Sinh ảnh (Render Model) *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={formRenderModel}
+                    onChange={(e) => setFormRenderModel(e.target.value)}
+                    placeholder={PROVIDER_PRESETS[formProvider].renderModel}
+                    className="w-full bg-[#FFFFFF] dark:bg-[#0E0E0D] border border-[#E2DDD5] dark:border-[#292925] p-2.5 text-xs text-[#1C1B18] dark:text-[#E8E7E2] font-mono focus:outline-none focus:border-[#1C1B18] dark:focus:border-[#5E5D57] transition-colors"
+                  />
+                </div>
+              )}
+
               <div className="space-y-1.5">
                 <label className="block text-[10px] uppercase tracking-wider text-[#6E6B64] dark:text-[#8C8B84] font-medium">
-                  Tên Mô hình AI (Model ID / Checkpoint) *
+                  Model Phân tích (Analyze Model) *
                 </label>
                 <input
                   type="text"
                   required
-                  value={formModel}
-                  onChange={(e) => setFormModel(e.target.value)}
-                  placeholder="imagen-3.0-generate-002 / flux-1-dev / custom-checkpoint"
+                  value={formAnalyzeModel}
+                  onChange={(e) => setFormAnalyzeModel(e.target.value)}
+                  placeholder={PROVIDER_PRESETS[formProvider].analyzeModel}
                   className="w-full bg-[#FFFFFF] dark:bg-[#0E0E0D] border border-[#E2DDD5] dark:border-[#292925] p-2.5 text-xs text-[#1C1B18] dark:text-[#E8E7E2] font-mono focus:outline-none focus:border-[#1C1B18] dark:focus:border-[#5E5D57] transition-colors"
                 />
               </div>
 
-              {/* Custom Headers */}
-              <div className="space-y-1.5">
-                <label className="block text-[10px] uppercase tracking-wider text-[#6E6B64] dark:text-[#8C8B84] font-medium">
-                  Custom HTTP Headers (Định dạng JSON tùy chọn)
-                </label>
-                <textarea
-                  rows={3}
-                  value={formHeaders}
-                  onChange={(e) => setFormHeaders(e.target.value)}
-                  placeholder='{\n  "Authorization": "Bearer ...",\n  "X-Custom-Header": "value"\n}'
-                  className="w-full bg-[#FFFFFF] dark:bg-[#0E0E0D] border border-[#E2DDD5] dark:border-[#292925] p-2 text-xs text-[#1C1B18] dark:text-[#E8E7E2] font-mono focus:outline-none focus:border-[#1C1B18] dark:focus:border-[#5E5D57] transition-colors"
-                />
-              </div>
-
-              {/* Notes */}
               <div className="space-y-1.5">
                 <label className="block text-[10px] uppercase tracking-wider text-[#6E6B64] dark:text-[#8C8B84]">
                   Ghi chú (Notes)
@@ -955,12 +1064,11 @@ export const SettingsView: React.FC = () => {
                   type="text"
                   value={formNotes}
                   onChange={(e) => setFormNotes(e.target.value)}
-                  placeholder="Ghi chú về tốc độ, chi phí hoặc mục đích sử dụng..."
+                  placeholder="Ghi chú..."
                   className="w-full bg-[#FFFFFF] dark:bg-[#0E0E0D] border border-[#E2DDD5] dark:border-[#292925] p-2 text-xs text-[#1C1B18] dark:text-[#E8E7E2] focus:outline-none focus:border-[#1C1B18] dark:focus:border-[#5E5D57]"
                 />
               </div>
 
-              {/* Actions in modal */}
               <div className="flex items-center justify-end gap-3 pt-4 border-t border-[#E2DDD5] dark:border-[#1D1D1B]">
                 <button
                   type="button"
@@ -973,7 +1081,7 @@ export const SettingsView: React.FC = () => {
                   type="submit"
                   className="px-5 py-2 text-[10px] uppercase tracking-[0.14em] bg-[#1C1B18] hover:bg-[#2F2E2B] text-[#F8F7F4] dark:bg-[#D8D3C5] dark:hover:bg-[#E8E7E2] dark:text-[#0B0B0A] font-medium cursor-pointer"
                 >
-                  {editingProfileId ? 'Cập nhật cấu hình' : 'Lưu & Kích hoạt API'}
+                  {editingProfileId ? 'Cập nhật' : 'Lưu profile'}
                 </button>
               </div>
             </form>

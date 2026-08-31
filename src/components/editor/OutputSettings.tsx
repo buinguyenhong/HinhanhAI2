@@ -1,7 +1,12 @@
 import React, { useState } from 'react';
 import { GenerationSettings, AspectRatio, QualityMode } from '../../types';
 import { ChevronDown, ChevronUp, Key, Cpu, Zap } from 'lucide-react';
-import { loadAppSettings, saveAppSettings, ApiProfile } from '../../services/storageService';
+import {
+  loadAppSettings,
+  saveAppSettings,
+  ApiProfile,
+  getRenderProfile,
+} from '../../services/storageService';
 
 interface OutputSettingsProps {
   settings: GenerationSettings;
@@ -16,7 +21,9 @@ export const OutputSettings: React.FC<OutputSettingsProps> = ({
 }) => {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const appSettings = loadAppSettings();
-  const [activeProfileId, setActiveProfileId] = useState(appSettings.activeProfileId);
+  const renderProfile = getRenderProfile(appSettings);
+
+  const renderProfiles = appSettings.apiProfiles.filter((p) => p.role !== 'analyze');
 
   const update = <K extends keyof GenerationSettings>(
     key: K,
@@ -26,28 +33,15 @@ export const OutputSettings: React.FC<OutputSettingsProps> = ({
   };
 
   const handleSwitchProfile = (profileId: string) => {
-    setActiveProfileId(profileId);
-    const profile = appSettings.apiProfiles.find((p) => p.id === profileId);
-    if (profile) {
-      const nextSettings = {
-        ...appSettings,
-        activeProfileId: profileId,
-        apiProvider: profile.provider,
-        apiKey: profile.apiKey,
-        apiEndpoint: profile.apiEndpoint,
-        selectedModel: profile.selectedModel,
-      };
-      saveAppSettings(nextSettings);
-      update('model', profile.selectedModel);
-      if (onActiveProfileChange) {
-        onActiveProfileChange(profile);
-      }
+    const profile = renderProfiles.find((p) => p.id === profileId);
+    if (!profile) return;
+    const nextSettings = { ...appSettings, renderProfileId: profileId };
+    saveAppSettings(nextSettings);
+    update('model', profile.renderModel);
+    if (onActiveProfileChange) {
+      onActiveProfileChange(profile);
     }
   };
-
-  const activeProfile =
-    appSettings.apiProfiles.find((p) => p.id === activeProfileId) ||
-    appSettings.apiProfiles[0];
 
   return (
     <div className="space-y-4">
@@ -65,32 +59,35 @@ export const OutputSettings: React.FC<OutputSettingsProps> = ({
         </button>
       </div>
 
-      {/* Primary Clean Rows */}
       <div className="space-y-3 border-t border-[#EDE9E1] dark:border-[#1D1D1B] pt-3 text-xs">
-        {/* Active API Selector */}
         <div className="flex items-center justify-between py-1 border-b border-[#EDE9E1] dark:border-[#1D1D1B] pb-2">
           <span className="text-[#6E6B64] dark:text-[#8C8B84] text-[11px] uppercase tracking-wider flex items-center gap-1.5 font-medium">
-            <Key size={11} className="text-[#1C1B18] dark:text-[#D8D3C5]" />
-            API Engine
+            <Zap size={11} className="text-[#1C1B18] dark:text-[#D8D3C5]" />
+            Render Engine
           </span>
-          <select
-            value={activeProfileId}
-            onChange={(e) => handleSwitchProfile(e.target.value)}
-            className="bg-transparent text-right text-xs font-semibold text-[#1C1B18] dark:text-[#E8E7E2] focus:outline-none cursor-pointer border-b border-transparent hover:border-[#CCC7BE] dark:hover:border-[#3A3935] focus:border-[#1C1B18] dark:focus:border-[#5E5D57] transition-colors appearance-none font-mono py-0.5 max-w-[200px] truncate"
-          >
-            {appSettings.apiProfiles.map((p) => (
-              <option
-                key={p.id}
-                value={p.id}
-                className="bg-[#FFFFFF] text-[#1C1B18] dark:bg-[#111110] dark:text-[#E8E7E2]"
-              >
-                {p.name} {p.id === activeProfileId ? '(Active)' : ''}
-              </option>
-            ))}
-          </select>
+          {renderProfiles.length === 0 ? (
+            <span className="text-[10px] font-mono text-[#DC2626]">
+              Chưa có profile render — vào Settings
+            </span>
+          ) : (
+            <select
+              value={renderProfile.id}
+              onChange={(e) => handleSwitchProfile(e.target.value)}
+              className="bg-transparent text-right text-xs font-semibold text-[#1C1B18] dark:text-[#E8E7E2] focus:outline-none cursor-pointer border-b border-transparent hover:border-[#CCC7BE] dark:hover:border-[#3A3935] focus:border-[#1C1B18] dark:focus:border-[#5E5D57] transition-colors appearance-none font-mono py-0.5 max-w-[220px] truncate"
+            >
+              {renderProfiles.map((p) => (
+                <option
+                  key={p.id}
+                  value={p.id}
+                  className="bg-[#FFFFFF] text-[#1C1B18] dark:bg-[#111110] dark:text-[#E8E7E2]"
+                >
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
 
-        {/* Ratio */}
         <div className="flex items-center justify-between py-1">
           <span className="text-[#6E6B64] dark:text-[#8C8B84] text-[11px] uppercase tracking-wider">
             Tỷ lệ (Ratio)
@@ -121,7 +118,6 @@ export const OutputSettings: React.FC<OutputSettingsProps> = ({
           </select>
         </div>
 
-        {/* Quality */}
         <div className="flex items-center justify-between py-1">
           <span className="text-[#6E6B64] dark:text-[#8C8B84] text-[11px] uppercase tracking-wider">
             Chất lượng (Quality)
@@ -143,7 +139,6 @@ export const OutputSettings: React.FC<OutputSettingsProps> = ({
           </select>
         </div>
 
-        {/* Variations */}
         <div className="flex items-center justify-between py-1">
           <span className="text-[#6E6B64] dark:text-[#8C8B84] text-[11px] uppercase tracking-wider">
             Số lượng (Variations)
@@ -164,10 +159,8 @@ export const OutputSettings: React.FC<OutputSettingsProps> = ({
         </div>
       </div>
 
-      {/* Advanced Accordion Panel */}
       {showAdvanced && (
         <div className="border-t border-[#EDE9E1] dark:border-[#1D1D1B] pt-4 space-y-4 text-xs">
-          {/* Structure preservation toggle */}
           <div className="flex items-center justify-between py-1">
             <div>
               <p className="text-[#6E6B64] dark:text-[#8C8B84] text-[11px] uppercase tracking-wider font-medium">
@@ -185,17 +178,15 @@ export const OutputSettings: React.FC<OutputSettingsProps> = ({
             />
           </div>
 
-          {/* Model info / override */}
           <div className="flex items-center justify-between py-1">
             <span className="text-[#6E6B64] dark:text-[#8C8B84] text-[11px] uppercase tracking-wider flex items-center gap-1">
               <Cpu size={11} /> Model Name
             </span>
-            <span className="font-mono text-xs text-[#1C1B18] dark:text-[#E8E7E2]">
-              {activeProfile ? activeProfile.selectedModel : settings.model}
+            <span className="font-mono text-xs text-[#1C1B18] dark:text-[#E8E7E2] truncate max-w-[200px]">
+              {renderProfile.renderModel || '(chưa cấu hình)'}
             </span>
           </div>
 
-          {/* CFG Scale slider */}
           <div className="space-y-1.5 py-1">
             <div className="flex justify-between text-[11px]">
               <span className="text-[#6E6B64] dark:text-[#8C8B84] uppercase tracking-wider">
@@ -214,7 +205,6 @@ export const OutputSettings: React.FC<OutputSettingsProps> = ({
             />
           </div>
 
-          {/* Negative Prompt */}
           <div className="space-y-1.5 py-1">
             <label className="block text-[10px] uppercase tracking-wider text-[#6E6B64] dark:text-[#8C8B84]">
               Negative Prompt (Loại trừ)
@@ -228,7 +218,6 @@ export const OutputSettings: React.FC<OutputSettingsProps> = ({
             />
           </div>
 
-          {/* Seed */}
           <div className="flex items-center justify-between py-1">
             <span className="text-[#6E6B64] dark:text-[#8C8B84] text-[11px] uppercase tracking-wider">
               Seed

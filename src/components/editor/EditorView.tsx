@@ -13,14 +13,14 @@ import { CanvasWorkspace } from './CanvasWorkspace';
 import { ImageLightbox } from './ImageLightbox';
 import { StyleAnalyzerModal } from './StyleAnalyzerModal';
 import { ArrowUpRight, Loader2, Zap, AlertCircle } from 'lucide-react';
-import { loadAppSettings, getActiveProfile, ApiProfile } from '../../services/storageService';
+import { loadAppSettings, getRenderProfile, ApiProfile } from '../../services/storageService';
 import { generateImages } from '../../services/imageGenerationService';
 import { saveGeneratedToHistory } from '../../services/historyService';
 import { uploadImageToDrive } from '../../services/googleDriveService';
 
 export const EditorView: React.FC = () => {
   const [appSettings, setAppSettings] = useState(loadAppSettings);
-  const activeApiProfile = getActiveProfile(appSettings);
+  const activeRenderProfile = getRenderProfile(appSettings);
 
   // Inputs
   const [sourceImage, setSourceImage] = useState<string | null>(null);
@@ -38,7 +38,7 @@ export const EditorView: React.FC = () => {
     controlNetWeight: 0.85,
     negativePrompt: '',
     seed: '-1',
-    model: activeApiProfile.selectedModel || 'imagen-3.0-generate-002',
+    model: activeRenderProfile.renderModel || 'imagen-3.0-generate-002',
     cfgScale: 7.0,
   });
 
@@ -82,7 +82,7 @@ export const EditorView: React.FC = () => {
     setAppSettings(loaded);
     setSettings((prev) => ({
       ...prev,
-      model: profile.selectedModel,
+      model: profile.renderModel,
     }));
   };
 
@@ -93,7 +93,7 @@ export const EditorView: React.FC = () => {
     setGenerationError(null);
 
     const currentConfig = loadAppSettings();
-    const currentActiveProfile = getActiveProfile(currentConfig);
+    const currentActiveProfile = getRenderProfile(currentConfig);
 
     const finalPrompt =
       prompt.trim() ||
@@ -227,10 +227,10 @@ export const EditorView: React.FC = () => {
         <div className="p-3 border border-[#E2DDD5] dark:border-[#1D1D1B] bg-[#FFFFFF] dark:bg-[#111110] flex items-center justify-between text-[10px] font-mono">
           <div className="flex items-center gap-1.5 truncate text-[#6E6B64] dark:text-[#8C8B84]">
             <Zap size={12} className="text-[#1C1B18] dark:text-[#D8D3C5] shrink-0" />
-            <span className="truncate">Active API: <b className="text-[#1C1B18] dark:text-[#E8E7E2] font-semibold">{activeApiProfile.name}</b></span>
+            <span className="truncate">Render Engine: <b className="text-[#1C1B18] dark:text-[#E8E7E2] font-semibold">{activeRenderProfile.name}</b></span>
           </div>
           <span className="text-[9px] uppercase px-1.5 py-0.5 bg-[#22C55E]/15 text-[#15803D] dark:text-[#4ADE80] font-medium shrink-0">
-            {activeApiProfile.provider.toUpperCase()}
+            {activeRenderProfile.provider.toUpperCase()}
           </span>
         </div>
 

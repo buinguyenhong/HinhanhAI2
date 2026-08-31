@@ -29,6 +29,7 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 import { analyzeImageStyle } from '../../services/styleAnalysisService';
+import { getAnalyzeProfile, loadAppSettings } from '../../services/storageService';
 
 interface StyleAnalyzerModalProps {
   isOpen: boolean;
@@ -129,7 +130,8 @@ export const StyleAnalyzerModal: React.FC<StyleAnalyzerModalProps> = ({
   const runAnalysis = async (imgSrc: string, file: File | null, focusReq?: string) => {
     setIsAnalyzing(true);
     try {
-      const result = await analyzeImageStyle(imgSrc, file, focusReq || customFocus);
+      const analyzeProfile = getAnalyzeProfile(loadAppSettings());
+      const result = await analyzeImageStyle(imgSrc, file, focusReq || customFocus, analyzeProfile);
       setAnalysisResult(result);
     } catch (err) {
       console.error('Failed to analyze image style:', err);

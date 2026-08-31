@@ -1,13 +1,11 @@
 import {
   GeneratedImage,
-  GenerationSettings,
   AspectRatio,
   QualityMode,
 } from '../types';
 import { ApiProfile } from './storageService';
 import { getAuthHeaders } from './authService';
 
-// Helper to convert blob/file url or File object to Base64
 async function fileOrUrlToBase64(fileOrUrl: File | string | null): Promise<string | null> {
   if (!fileOrUrl) return null;
 
@@ -20,12 +18,10 @@ async function fileOrUrlToBase64(fileOrUrl: File | string | null): Promise<strin
     });
   }
 
-  // If it's already a base64 string
   if (fileOrUrl.startsWith('data:image/')) {
     return fileOrUrl;
   }
 
-  // If it's a blob: or object URL or remote URL, fetch and convert
   try {
     const response = await fetch(fileOrUrl);
     const blob = await response.blob();
@@ -70,7 +66,6 @@ export async function generateImages(params: GenerateImageParams): Promise<Gener
     activeProfile,
   } = params;
 
-  // Convert source and reference images to base64 if present
   const sourceImageBase64 = await fileOrUrlToBase64(sourceFile || sourceImage);
   const referenceImageBase64 = await fileOrUrlToBase64(referenceFile || referenceImage);
 
@@ -88,11 +83,10 @@ export async function generateImages(params: GenerateImageParams): Promise<Gener
         variations,
         quality,
         seed,
-        model: activeProfile.selectedModel,
+        model: activeProfile.renderModel,
         provider: activeProfile.provider,
-        customApiKey: activeProfile.apiKey || undefined,
-        customEndpoint: activeProfile.apiEndpoint || undefined,
-        customHeaders: activeProfile.customHeaders || undefined,
+        apiKey: activeProfile.apiKey || undefined,
+        apiEndpoint: activeProfile.apiEndpoint || undefined,
         sourceImageBase64,
         referenceImageBase64,
       }),
@@ -104,6 +98,9 @@ export async function generateImages(params: GenerateImageParams): Promise<Gener
     }
 
     const data = await response.json();
+    if (!data.success) {
+      throw new Error(data.error || 'Server returned unsuccessful response');
+    }
     if (data.images && Array.isArray(data.images) && data.images.length > 0) {
       return data.images.map((img: { url: string; seed?: string; modelUsed?: string; isFallbackEngine?: boolean }, idx: number) => ({
         id: Math.random().toString(36).substring(2, 9).toUpperCase(),
@@ -115,7 +112,7 @@ export async function generateImages(params: GenerateImageParams): Promise<Gener
         }),
         aspectRatio: aspectRatio,
         quality: quality,
-        model: img.modelUsed || `${activeProfile.name} • ${activeProfile.selectedModel}`,
+        model: img.modelUsed || `${activeProfile.name} • ${activeProfile.renderModel}`,
         seed: img.seed || (seed !== '-1' ? seed : Math.floor(Math.random() * 999999).toString()),
         sourceImageName: sourceFile?.name,
         referenceImageName: referenceFile?.name,
@@ -125,49 +122,6 @@ export async function generateImages(params: GenerateImageParams): Promise<Gener
 
     throw new Error('No images returned from generation server');
   } catch (error: any) {
-    console.error('Failed to generate real image via API:', error);
-
-    // Fallback: Generate real-time neural synthesis URLs directly on client if backend fails
-    const mappedRatio = aspectRatio === '16:9' ? '16:9' : aspectRatio === '9:16' ? '9:16' : '1:1';
-    let width = 1024;
-    let height = 1024;
-    if (mappedRatio === '16:9') {
-      width = 1280;
-      height = 720;
-    } else if (mappedRatio === '9:16') {
-      width = 720;
-      height = 1280;
-    }
-
-    const baseSeed = seed && seed !== '-1' ? parseInt(seed, 10) : Math.floor(Math.random() * 900000) + 100000;
-    const fallbackList: GeneratedImage[] = [];
-
-    for (let i = 0; i < variations; i++) {
-      const itemSeed = baseSeed + i * 941;
-      const encodedPrompt = encodeURIComponent(
-        `${prompt}, masterpiece, photorealistic, 8k resolution, cinematic lighting${
-          negativePrompt ? `, avoid ${negativePrompt}` : ''
-        }`
-      );
-      const liveAiUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&seed=${itemSeed}&nologo=true&enhance=true&model=flux`;
-
-      fallbackList.push({
-        id: Math.random().toString(36).substring(2, 9).toUpperCase(),
-        url: liveAiUrl,
-        prompt: prompt,
-        createdAt: new Date().toLocaleTimeString('vi-VN', {
-          hour: '2-digit',
-          minute: '2-digit',
-        }),
-        aspectRatio: aspectRatio,
-        quality: quality,
-        model: `${activeProfile.name} • Flux Neural Live`,
-        seed: itemSeed.toString(),
-        sourceImageName: sourceFile?.name,
-        referenceImageName: referenceFile?.name,
-      });
-    }
-
-    return fallbackList;
+    throw new Error(error?.message || 'Failed to generate image via API');
   }
 }

@@ -1,4 +1,5 @@
 import { StyleAnalysisResult, AspectRatio, BackgroundPropObject } from '../types';
+import { ApiProfile } from './storageService';
 import { getAuthHeaders } from './authService';
 
 // Helper to convert image URL or File to base64
@@ -414,27 +415,37 @@ export async function generateIntelligentVisualAnalysis(
   };
 }
 
-// Main API analysis function: Tries backend Gemini first, gracefully falls back to intelligent visual engine
+// Main API analysis function: Tries backend (multi-provider) first, gracefully falls back to intelligent visual engine
 export async function analyzeImageStyle(
   imageSrc: string,
   file?: File | null,
-  userFocus?: string
+  userFocus?: string,
+  analyzeProfile?: ApiProfile | null
 ): Promise<StyleAnalysisResult> {
   try {
     const { base64, mimeType } = await imageToBase64(imageSrc, file);
 
-    // Call server endpoint
+    const body: any = {
+      imageBase64: base64,
+      mimeType,
+      userFocus,
+    };
+
+    if (analyzeProfile) {
+      body.provider = analyzeProfile.provider;
+      body.model = analyzeProfile.analyzeModel;
+      body.apiKey = analyzeProfile.apiKey || undefined;
+      body.apiEndpoint = analyzeProfile.apiEndpoint || undefined;
+    }
+
+    // Call server endpoint (multi-provider aware)
     const response = await fetch('/api/gemini/analyze-style', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         ...getAuthHeaders(),
       },
-      body: JSON.stringify({
-        imageBase64: base64,
-        mimeType,
-        userFocus,
-      }),
+      body: JSON.stringify(body),
     });
 
     if (response.ok) {
