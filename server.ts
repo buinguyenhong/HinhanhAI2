@@ -895,9 +895,25 @@ async function generateWithGemini(p: GenerateParams): Promise<GeneratedVariant[]
   return out;
 }
 
+function extractUpstreamErrorMessage(status: number, rawText: string): string {
+  // Try to extract human-readable message from typical proxy error envelopes
+  try {
+    const j = JSON.parse(rawText);
+    return (
+      j?.error?.message ||
+      j?.message ||
+      j?.error ||
+      rawText.slice(0, 300)
+    );
+  } catch {
+    return rawText.slice(0, 300);
+  }
+}
+
 async function generateWithOpenAI(p: GenerateParams): Promise<GeneratedVariant[]> {
-  const endpoint =
-    (p.apiEndpoint?.replace(/\/$/, '') || 'https://api.openai.com/v1') + '/images/generations';
+  const base = p.apiEndpoint?.replace(/\/$/, '') || 'https://api.openai.com/v1';
+  // Try common OpenAI image routes. Some proxies use '/images' instead of '/images/generations'.
+  const candidatePaths = ['/images/generations', '/images', '/v1/images/generations'];
   const sizeMap: Record<string, string> = {
     '1:1': '1024x1024',
     '16:9': '1792x1024',
@@ -905,42 +921,71 @@ async function generateWithOpenAI(p: GenerateParams): Promise<GeneratedVariant[]
     '4:3': '1024x1024',
     '3:4': '1024x1024',
   };
-  const response = await fetchWithTimeout(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${p.apiKey}`,
-    },
-    body: JSON.stringify({
-      model: p.model,
-      prompt: p.prompt,
-      n: p.variations,
-      size: sizeMap[p.aspectRatio] || '1024x1024',
-      quality: p.quality === 'standard' ? 'standard' : 'hd',
-    }),
-  }, GENERATE_TIMEOUT_MS);
+  const body = JSON.stringify({
+    model: p.model,
+    prompt: p.prompt,
+    n: p.variations,
+    size: sizeMap[p.aspectRatio] || '1024x1024',
+    quality: p.quality === 'standard' ? 'standard' : 'hd',
+  });
 
-  if (!response.ok) {
-    const errText = await response.text().catch(() => '');
-    throw new Error(`OpenAI generate failed (${response.status}): ${errText.slice(0, 300)}`);
-  }
-  const data: any = await response.json();
-  const baseSeed = p.seed && p.seed !== '-1' ? parseInt(p.seed, 10) : Math.floor(Math.random() * 900000) + 100000;
-  const out: GeneratedVariant[] = [];
-  if (Array.isArray(data?.data)) {
-    data.data.forEach((item: any, idx: number) => {
-      const url = item?.url || (item?.b64_json ? `data:image/png;base64,${item.b64_json}` : '');
-      if (url) {
-        out.push({
-          url,
-          seed: (baseSeed + idx * 941).toString(),
-          modelUsed: `OpenAI ${p.model}`,
+  let lastErr = '';
+  for (const path of candidatePaths) {
+    const url = base + path;
+    let response: globalThis.Response;
+    try {
+      response = await fetchWithTimeout(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${p.apiKey}`,
+        },
+        body,
+      }, GENERATE_TIMEOUT_MS);
+    } catch (err: any) {
+      const isAbort = err?.name === 'AbortError' || /aborted|timeout/i.test(err?.message || '');
+      throw new Error(isAbort
+        ? `Provider phản hồi quá ${GENERATE_TIMEOUT_MS / 1000}s tại ${url}. Vui lòng thử lại hoặc đổi profile.`
+        : `Không thể kết nối ${url}: ${err?.message || err}`);
+    }
+
+    if (response.ok) {
+      const data: any = await response.json();
+      const baseSeed = p.seed && p.seed !== '-1' ? parseInt(p.seed, 10) : Math.floor(Math.random() * 900000) + 100000;
+      const out: GeneratedVariant[] = [];
+      if (Array.isArray(data?.data)) {
+        data.data.forEach((item: any, idx: number) => {
+          const url = item?.url || (item?.b64_json ? `data:image/png;base64,${item.b64_json}` : '');
+          if (url) {
+            out.push({
+              url,
+              seed: (baseSeed + idx * 941).toString(),
+              modelUsed: `OpenAI ${p.model}`,
+            });
+          }
         });
       }
-    });
+      if (out.length === 0) throw new Error('OpenAI returned no image data.');
+      return out;
+    }
+
+    const errText = await response.text().catch(() => '');
+    const humanMsg = extractUpstreamErrorMessage(response.status, errText);
+    // If endpoint route does not exist, try next candidate.
+    if (response.status === 404 || response.status === 405) {
+      lastErr = `${response.status} @ ${url} → ${humanMsg}`;
+      console.warn(`OpenAI image route failed, trying next: ${lastErr}`);
+      continue;
+    }
+    // Otherwise surface immediately.
+    throw new Error(`OpenAI generate failed (${response.status}) @ ${url}: ${humanMsg}`);
   }
-  if (out.length === 0) throw new Error('OpenAI did not return any image data.');
-  return out;
+
+  // All candidates 404'd → endpoint clearly does not support image generation.
+  throw new Error(
+    `Endpoint '${base}' không hỗ trợ sinh ảnh (thử ${candidatePaths.join(', ')} đều 404). ` +
+    `Hãy chọn endpoint có route OpenAI /images/generations (VD: api.openai.com, api.together.xyz).`
+  );
 }
 
 // Endpoint: AI Image Generation (multi-provider; no Pollinations fallback)
@@ -1074,6 +1119,156 @@ app.post('/api/generate-image', aiLimiter, async (req, res) => {
       error: error?.message || 'Failed to generate image',
       success: false,
     });
+  }
+});
+
+// Endpoint: Test profile connectivity (quick sanity check before user attempts real generation)
+app.post('/api/test-profile', aiLimiter, async (req, res) => {
+  try {
+    const schema = z.object({
+      provider: z.enum(['gemini', 'openai', 'anthropic']),
+      apiKey: z.string().max(500).optional().nullable(),
+      apiEndpoint: z.string().max(500).optional().nullable(),
+      model: z.string().max(150).optional().nullable(),
+      role: z.enum(['render', 'analyze', 'both']).optional().default('both'),
+    });
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Invalid payload', success: false });
+    }
+    const { provider, apiKey, apiEndpoint, model, role } = parsed.data;
+    const start = Date.now();
+
+    const checks: { name: string; ok: boolean; latency?: number; detail?: string }[] = [];
+
+    // 1) Analyze probe — tiny text-only request (cheap, validates chat/vision route)
+    if (role === 'analyze' || role === 'both') {
+      try {
+        if (provider === 'gemini') {
+          const key = apiKey || process.env.GEMINI_API_KEY;
+          if (!key) throw new Error('Thiếu GEMINI_API_KEY');
+          const ai = new GoogleGenAI({ apiKey: key });
+          await ai.models.generateContent({
+            model: model || 'gemini-3.1-flash-lite',
+            contents: { parts: [{ text: 'Reply with the single word: ok' }] },
+          });
+          checks.push({ name: 'analyze (gemini text)', ok: true, latency: Date.now() - start });
+        } else if (provider === 'openai') {
+          const endpoint = (apiEndpoint?.replace(/\/$/, '') || 'https://api.openai.com/v1') + '/chat/completions';
+          const r = await fetchWithTimeout(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+            body: JSON.stringify({
+              model: model || 'gpt-4o-mini',
+              messages: [{ role: 'user', content: 'Reply with the single word: ok' }],
+              max_tokens: 8,
+            }),
+          }, ANALYZE_TIMEOUT_MS);
+          checks.push({
+            name: 'analyze (openai chat)',
+            ok: r.ok,
+            latency: Date.now() - start,
+            detail: r.ok ? undefined : `${r.status} ${(await r.text().catch(() => '')).slice(0, 200)}`,
+          });
+          if (!r.ok) await r.text().catch(() => {});
+        } else if (provider === 'anthropic') {
+          const endpoint = (apiEndpoint?.replace(/\/$/, '') || 'https://api.anthropic.com') + '/v1/messages';
+          const r = await fetchWithTimeout(endpoint, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-api-key': apiKey || '',
+              'anthropic-version': '2023-06-01',
+              'anthropic-dangerous-direct-browser-access': 'true',
+            },
+            body: JSON.stringify({
+              model: model || 'claude-3-5-sonnet-latest',
+              max_tokens: 8,
+              messages: [{ role: 'user', content: 'Reply with the single word: ok' }],
+            }),
+          }, ANALYZE_TIMEOUT_MS);
+          checks.push({
+            name: 'analyze (anthropic messages)',
+            ok: r.ok,
+            latency: Date.now() - start,
+            detail: r.ok ? undefined : `${r.status} ${(await r.text().catch(() => '')).slice(0, 200)}`,
+          });
+          if (!r.ok) await r.text().catch(() => {});
+        }
+      } catch (e: any) {
+        checks.push({ name: 'analyze', ok: false, detail: e?.message || String(e) });
+      }
+    }
+
+    // 2) Render probe — try common image paths, 1x1 not needed; just see if route exists
+    if ((role === 'render' || role === 'both') && provider === 'openai') {
+      const base = apiEndpoint?.replace(/\/$/, '') || 'https://api.openai.com/v1';
+      const paths = ['/images/generations', '/images', '/v1/images/generations'];
+      let renderOk = false;
+      let renderDetail = '';
+      for (const p of paths) {
+        const url = base + p;
+        try {
+          const r = await fetchWithTimeout(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+            body: JSON.stringify({
+              model: model || 'gpt-image-1',
+              prompt: 'a tiny red dot',
+              n: 1,
+              size: '1024x1024',
+            }),
+          }, GENERATE_TIMEOUT_MS);
+          if (r.ok) {
+            renderOk = true;
+            checks.push({ name: `render (openai ${p})`, ok: true, latency: Date.now() - start });
+            break;
+          } else {
+            const t = await r.text().catch(() => '');
+            const msg = extractUpstreamErrorMessage(r.status, t);
+            renderDetail = `${r.status} @ ${p}: ${msg}`;
+            if (r.status !== 404 && r.status !== 405) {
+              // non-404 → endpoint exists, but request failed (e.g. invalid key). Surface.
+              checks.push({ name: `render (openai ${p})`, ok: false, detail: renderDetail });
+              renderOk = true; // treat as "reachable" so user knows it's not a 404 issue
+              break;
+            }
+          }
+        } catch (e: any) {
+          renderDetail = e?.message || String(e);
+        }
+      }
+      if (!renderOk) {
+        checks.push({
+          name: 'render (openai)',
+          ok: false,
+          detail: `Endpoint '${base}' không hỗ trợ sinh ảnh (thử ${paths.join(', ')} đều 404 / lỗi). ${renderDetail}`,
+        });
+      }
+    } else if ((role === 'render' || role === 'both') && provider === 'anthropic') {
+      checks.push({
+        name: 'render (anthropic)',
+        ok: false,
+        detail: 'Anthropic không hỗ trợ sinh ảnh. Vui lòng chọn Gemini hoặc OpenAI để sinh ảnh.',
+      });
+    } else if ((role === 'render' || role === 'both') && provider === 'gemini') {
+      checks.push({
+        name: 'render (gemini)',
+        ok: true,
+        detail: 'Gemini render dùng SDK server-side; không cần kiểm tra endpoint.',
+      });
+    }
+
+    const allOk = checks.every((c) => c.ok);
+    return res.json({
+      success: allOk,
+      provider,
+      role,
+      checks,
+      message: allOk ? 'Tất cả kiểm tra pass.' : 'Một số kiểm tra thất bại — xem chi tiết.',
+    });
+  } catch (e: any) {
+    return res.status(500).json({ error: e?.message || 'Test failed', success: false });
   }
 });
 

@@ -261,7 +261,7 @@ export const SettingsView: React.FC = () => {
     saveAppSettings(nextSettings);
   };
 
-  const handleTestProfileConnection = (profile: ApiProfile) => {
+  const handleTestProfileConnection = async (profile: ApiProfile) => {
     setTestingProfileId(profile.id);
     setTestResults((prev) => {
       const next = { ...prev };
@@ -269,30 +269,66 @@ export const SettingsView: React.FC = () => {
       return next;
     });
 
-    setTimeout(() => {
+    const hasKey = Boolean(profile.apiKey.trim()) || profile.provider === 'gemini';
+    if (!hasKey) {
       setTestingProfileId(null);
-      const hasKey = Boolean(profile.apiKey.trim()) || profile.provider === 'gemini';
+      setTestResults((prev) => ({
+        ...prev,
+        [profile.id]: {
+          status: 'error',
+          message: 'Thiếu API Key cho nhà cung cấp này. Vui lòng bấm Sửa để bổ sung.',
+        },
+      }));
+      return;
+    }
 
-      if (!hasKey) {
-        setTestResults((prev) => ({
-          ...prev,
-          [profile.id]: {
-            status: 'error',
-            message: 'Thiếu API Key cho nhà cung cấp này. Vui lòng bấm Sửa để bổ sung.',
-          },
-        }));
-      } else {
-        const randomLatency = Math.floor(Math.random() * 120) + 95;
+    try {
+      const { getAuthHeaders } = await import('../../services/authService');
+      const response = await fetch('/api/test-profile', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify({
+          provider: profile.provider,
+          apiKey: profile.apiKey || undefined,
+          apiEndpoint: profile.apiEndpoint || undefined,
+          model: profile.role === 'analyze' ? profile.analyzeModel : profile.renderModel,
+          role: profile.role,
+        }),
+      });
+      const data = await response.json();
+      const failed = (data.checks || []).filter((c: any) => !c.ok);
+      if (response.ok && data.success) {
         setTestResults((prev) => ({
           ...prev,
           [profile.id]: {
             status: 'success',
-            message: `Hoạt động tốt • Endpoint phản hồi chuẩn • Độ tr�: ${randomLatency}ms`,
-            latency: randomLatency,
+            message: `Pass • ${(data.checks || []).map((c: any) => `${c.name}${c.latency ? ` (${c.latency}ms)` : ''}`).join(' | ')}`,
+          },
+        }));
+      } else {
+        const firstFail = failed[0];
+        setTestResults((prev) => ({
+          ...prev,
+          [profile.id]: {
+            status: 'error',
+            message: firstFail?.detail || data.error || 'Test thất bại — xem chi tiết.',
           },
         }));
       }
-    }, 1100);
+    } catch (err: any) {
+      setTestResults((prev) => ({
+        ...prev,
+        [profile.id]: {
+          status: 'error',
+          message: `L�i mạng khi test: ${err?.message || err}`,
+        },
+      }));
+    } finally {
+      setTestingProfileId(null);
+    }
   };
 
   const handleConnectDrive = async (e?: React.FormEvent) => {
