@@ -71,10 +71,30 @@ Xem `.env.example`:
 - `GEMINI_API_KEY` — key Gemini (AI Studio có thể tự inject khi deploy lên AI Studio/Vercel).
 - `APP_PASSWORD` — mật khẩu đăng nhập (mặc định local: `admin`; production bắt buộc set).
 - `JWT_SECRET` — khóa ký JWT (production bắt buộc set; local có giá trị dev).
-- `OPENAI_ALLOWED_DOMAINS` — **legacy/không còn dùng**. Endpoint OpenAI-compatible hiện tự do (chỉ check URL hợp lệ). Người dùng tự chịu trách nhiệm chọn endpoint tin cậy.
+- `OPENAI_ALLOWED_DOMAINS` — **legacy/không còn dùng**. Endpoint [OI]-compatible hiện tự do (chỉ check URL hợp lệ). Người dùng tự chịu trách nhiệm chọn endpoint tin cậy.
 - `ANALYZE_NORMALIZER_ENABLED` — bật/tắt server-side LLM normalizer (mặc định `true`). Khi provider trả JSON sai schema, server gọi Gemini flash-lite map về schema chuẩn.
+- `ANALYZE_TIMEOUT_MS` — timeout cho analyze (mặc định `60000`).
+- `GENERATE_TIMEOUT_MS` — timeout cho generate (mặc định `90000`).
 - `PORT` — cổng server (mặc định 3000).
 - Rate limit: `RATE_LIMIT_WINDOW_MS`, `RATE_LIMIT_MAX`, `AI_RATE_LIMIT_MAX`.
+
+### 5.1. Endpoint routes
+
+| Endpoint | Method | Mục đích |
+|---|---|---|
+| `/api/health` | GET | Public health check. |
+| `/api/login` | POST | JWT 12h + cookie httpOnly. |
+| `/api/gemini/analyze-style` | POST | Phân tích ảnh mẫu (multi-provider + vision). |
+| `/api/generate-image` | POST | Sinh ảnh (multi-provider). |
+| `/api/test-profile` | POST | Connectivity check thật (text probe + image route probe). |
+
+### 5.2. Provider rules
+
+| Provider | Render | Analyze | Notes |
+|---|---|---|---|
+| `gemini` | ✅ | ✅ | Dùng SDK + key. Không cần endpoint custom. |
+| `openai` ([OI]-compatible) | ✅ | ✅ | Thử `/images/generations`, `/images`, `/v1/images/generations`. |
+| `anthropic` | ❌ | ✅ | UI chặn role render; server trả 400 nếu cố. |
 
 ## 6. Các endpoint chính (server.ts)
 - `GET /api/health` — public.
