@@ -366,6 +366,17 @@ Return STRICTLY a JSON object matching the required schema. No prose, no markdow
 
 // --- PROVIDER-SPECIFIC ANALYSIS CALLS ---
 
+// Timeout helper to abort slow upstream calls (e.g. congested proxies).
+function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<globalThis.Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...init, signal: controller.signal }).finally(() => clearTimeout(timer));
+}
+
+// Default timeouts (override via env)
+const ANALYZE_TIMEOUT_MS = Number(process.env.ANALYZE_TIMEOUT_MS) || 60000; // 60s
+const GENERATE_TIMEOUT_MS = Number(process.env.GENERATE_TIMEOUT_MS) || 90000; // 90s
+
 async function analyzeWithGemini(opts: {
   apiKey: string;
   model: string;
@@ -435,7 +446,7 @@ async function analyzeWithOpenAI(opts: {
     ? `${ANALYSIS_PROMPT_TEXT}\n\nUser specific focus request: "${opts.userFocus}"`
     : ANALYSIS_PROMPT_TEXT;
 
-  const response = await fetch(endpoint, {
+  const response = await fetchWithTimeout(endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -460,7 +471,7 @@ async function analyzeWithOpenAI(opts: {
       response_format: { type: 'json_object' },
       max_tokens: 4096,
     }),
-  });
+  }, ANALYZE_TIMEOUT_MS);
 
   if (!response.ok) {
     const errText = await response.text().catch(() => '');
@@ -489,7 +500,7 @@ async function analyzeWithAnthropic(opts: {
     ? `${ANALYSIS_PROMPT_TEXT}\n\nUser specific focus request: "${opts.userFocus}"`
     : ANALYSIS_PROMPT_TEXT;
 
-  const response = await fetch(endpoint, {
+  const response = await fetchWithTimeout(endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -519,7 +530,7 @@ async function analyzeWithAnthropic(opts: {
         },
       ],
     }),
-  });
+  }, ANALYZE_TIMEOUT_MS);
 
   if (!response.ok) {
     const errText = await response.text().catch(() => '');
@@ -761,10 +772,13 @@ app.post('/api/gemini/analyze-style', aiLimiter, async (req, res) => {
         return res.status(400).json({ error: `Provider không hợp lệ: ${provider}`, success: false });
       }
     } catch (providerErr: any) {
-      console.warn(`Analyze via ${provider} failed, fallback to visual engine:`, providerErr?.message);
+      const isAbort = providerErr?.name === 'AbortError' || /aborted|timeout/i.test(providerErr?.message || '');
+      console.warn(`Analyze via ${provider} failed${isAbort ? ' (timeout)' : ''}, fallback to visual engine:`, providerErr?.message);
       return res.status(200).json({
         fallback: true,
-        message: providerErr?.message || `Phân tích qua ${provider} thất bại. Đã chuyển sang visual engine.`,
+        message: isAbort
+          ? `Provider '${provider}' phản hồi quá ${ANALYZE_TIMEOUT_MS / 1000}s. Đã chuyển sang visual engine.`
+          : providerErr?.message || `Phân tích qua ${provider} thất bại. Đã chuyển sang visual engine.`,
       });
     }
 
@@ -891,7 +905,7 @@ async function generateWithOpenAI(p: GenerateParams): Promise<GeneratedVariant[]
     '4:3': '1024x1024',
     '3:4': '1024x1024',
   };
-  const response = await fetch(endpoint, {
+  const response = await fetchWithTimeout(endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -904,7 +918,7 @@ async function generateWithOpenAI(p: GenerateParams): Promise<GeneratedVariant[]
       size: sizeMap[p.aspectRatio] || '1024x1024',
       quality: p.quality === 'standard' ? 'standard' : 'hd',
     }),
-  });
+  }, GENERATE_TIMEOUT_MS);
 
   if (!response.ok) {
     const errText = await response.text().catch(() => '');
@@ -1027,9 +1041,12 @@ app.post('/api/generate-image', aiLimiter, async (req, res) => {
         return res.status(400).json({ error: `Provider không hỗ trợ sinh ảnh: ${provider}`, success: false });
       }
     } catch (genErr: any) {
-      console.error(`Generate via ${provider} failed:`, genErr?.message);
+      const isAbort = genErr?.name === 'AbortError' || /aborted|timeout/i.test(genErr?.message || '');
+      console.error(`Generate via ${provider} failed${isAbort ? ' (timeout)' : ''}:`, genErr?.message);
       return res.status(500).json({
-        error: genErr?.message || `Sinh ảnh qua ${provider} thất bại. Vui lòng thử lại hoặc đổi profile.`,
+        error: isAbort
+          ? `Provider '${provider}' phản hồi quá ${GENERATE_TIMEOUT_MS / 1000}s. Vui lòng thử lại hoặc đổi profile.`
+          : genErr?.message || `Sinh ảnh qua ${provider} thất bại. Vui lòng thử lại hoặc đổi profile.`,
         success: false,
       });
     }

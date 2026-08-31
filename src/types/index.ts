@@ -1,7 +1,7 @@
 export type ActiveTab = 'editor' | 'dashboard' | 'history' | 'settings';
 export type ThemeMode = 'dark' | 'light';
 
-export type AspectRatio = 'original' | '1:1' | '16:9' | '9:16' | '4:3' | '3:2';
+export type AspectRatio = 'original' | '1:1' | '16:9' | '9:16' | '4:3' | '3:2' | '21:9' | '3:4' | '2:3';
 export type QualityMode = 'standard' | 'high' | 'raw';
 export type GenState = 'idle' | 'generating' | 'done';
 

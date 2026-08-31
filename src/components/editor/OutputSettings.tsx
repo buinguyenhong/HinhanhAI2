@@ -115,6 +115,15 @@ export const OutputSettings: React.FC<OutputSettingsProps> = ({
             <option value="3:2" className="bg-[#FFFFFF] text-[#1C1B18] dark:bg-[#111110] dark:text-[#E8E7E2]">
               3:2 — Nhiếp ảnh 35mm
             </option>
+            <option value="21:9" className="bg-[#FFFFFF] text-[#1C1B18] dark:bg-[#111110] dark:text-[#E8E7E2]">
+              21:9 — Cinematic Scope
+            </option>
+            <option value="3:4" className="bg-[#FFFFFF] text-[#1C1B18] dark:bg-[#111110] dark:text-[#E8E7E2]">
+              3:4 — Chân dung dọc
+            </option>
+            <option value="2:3" className="bg-[#FFFFFF] text-[#1C1B18] dark:bg-[#111110] dark:text-[#E8E7E2]">
+              2:3 — Poster dọc
+            </option>
           </select>
         </div>
 

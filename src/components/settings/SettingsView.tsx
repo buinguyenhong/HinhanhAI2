@@ -861,6 +861,9 @@ export const SettingsView: React.FC = () => {
                 <option value="9:16">9:16 (Story)</option>
                 <option value="4:3">4:3 (Editorial)</option>
                 <option value="3:2">3:2 (Nhiếp ảnh 35mm)</option>
+                <option value="21:9">21:9 (Cinematic Scope)</option>
+                <option value="3:4">3:4 (Chân dung dọc)</option>
+                <option value="2:3">2:3 (Poster dọc)</option>
               </select>
             </div>
           </div>
