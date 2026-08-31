@@ -192,9 +192,16 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
 
                   {/* Caption line */}
                   <div className="p-2.5 flex items-center justify-between text-[10px] border-t border-[#EDE9E1] dark:border-[#1D1D1B] bg-[#FFFFFF] dark:bg-[#0E0E0D]">
-                    <span className="text-[#6E6B64] dark:text-[#8C8B84] truncate max-w-[160px] font-mono">
-                      {img.model}
-                    </span>
+                    <div className="flex items-center gap-1.5 truncate max-w-[170px]">
+                      {img.isFallbackEngine && (
+                        <span className="px-1 py-0.5 text-[8px] uppercase tracking-wider font-mono bg-[#FEF3C7] text-[#92400E] dark:bg-[#78350F]/40 dark:text-[#FDE68A] border border-[#FDE68A] dark:border-[#92400E]">
+                          Fallback
+                        </span>
+                      )}
+                      <span className="text-[#6E6B64] dark:text-[#8C8B84] truncate font-mono">
+                        {img.model}
+                      </span>
+                    </div>
                     <span className="text-[#9C988F] dark:text-[#5E5D57] font-mono font-medium">
                       {isSelected ? 'ĐÃ CHỌN' : 'CHỌN'}
                     </span>

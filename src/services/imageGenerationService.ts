@@ -5,6 +5,7 @@ import {
   QualityMode,
 } from '../types';
 import { ApiProfile } from './storageService';
+import { getAuthHeaders } from './authService';
 
 // Helper to convert blob/file url or File object to Base64
 async function fileOrUrlToBase64(fileOrUrl: File | string | null): Promise<string | null> {
@@ -78,6 +79,7 @@ export async function generateImages(params: GenerateImageParams): Promise<Gener
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...getAuthHeaders(),
       },
       body: JSON.stringify({
         prompt,
@@ -103,7 +105,7 @@ export async function generateImages(params: GenerateImageParams): Promise<Gener
 
     const data = await response.json();
     if (data.images && Array.isArray(data.images) && data.images.length > 0) {
-      return data.images.map((img: { url: string; seed?: string; modelUsed?: string }, idx: number) => ({
+      return data.images.map((img: { url: string; seed?: string; modelUsed?: string; isFallbackEngine?: boolean }, idx: number) => ({
         id: Math.random().toString(36).substring(2, 9).toUpperCase(),
         url: img.url,
         prompt: prompt,
@@ -117,6 +119,7 @@ export async function generateImages(params: GenerateImageParams): Promise<Gener
         seed: img.seed || (seed !== '-1' ? seed : Math.floor(Math.random() * 999999).toString()),
         sourceImageName: sourceFile?.name,
         referenceImageName: referenceFile?.name,
+        isFallbackEngine: Boolean(img.isFallbackEngine),
       }));
     }
 

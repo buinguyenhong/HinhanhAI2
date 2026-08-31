@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ArrowUpRight, Loader2, Sun, Moon } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
+import { loginWithServer } from '../../services/authService';
 
 interface LoginViewProps {
   onLogin: () => void;
@@ -12,20 +13,24 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
   const [isLoading, setIsLoading] = useState(false);
   const { theme, toggleTheme } = useTheme();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!password.trim()) return;
     setError('');
     setIsLoading(true);
 
-    setTimeout(() => {
-      const correctPassword = import.meta.env.VITE_APP_PASSWORD || 'admin';
-      if (password === correctPassword) {
+    try {
+      const result = await loginWithServer(password.trim());
+      if (result.success) {
         onLogin();
       } else {
-        setError('Mã truy cập không hợp lệ. Vui lòng kiểm tra lại.');
+        setError(result.error || 'Mã truy cập không hợp lệ. Vui lòng kiểm tra lại.');
       }
+    } catch (err: any) {
+      setError('Lỗi kết nối đến máy chủ.');
+    } finally {
       setIsLoading(false);
-    }, 450);
+    }
   };
 
   return (

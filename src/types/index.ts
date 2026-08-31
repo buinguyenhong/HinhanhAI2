@@ -28,6 +28,7 @@ export interface GeneratedImage {
   seed?: string;
   sourceImageName?: string;
   referenceImageName?: string;
+  isFallbackEngine?: boolean;
 }
 
 export interface HistoryItem {

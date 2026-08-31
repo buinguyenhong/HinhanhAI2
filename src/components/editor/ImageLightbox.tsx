@@ -74,9 +74,16 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
           <p className="text-xs text-[#1C1B18] dark:text-[#E8E7E2] line-clamp-1 font-light tracking-wide">
             {image.prompt}
           </p>
-          <p className="text-[10px] text-[#9C988F] dark:text-[#5E5D57] font-mono mt-0.5">
-            Engine: {image.model}
-          </p>
+          <div className="flex items-center gap-2 mt-0.5">
+            <p className="text-[10px] text-[#9C988F] dark:text-[#5E5D57] font-mono">
+              Engine: {image.model}
+            </p>
+            {image.isFallbackEngine && (
+              <span className="px-1.5 py-0.5 text-[8px] uppercase tracking-wider font-mono bg-[#FEF3C7] text-[#92400E] dark:bg-[#78350F]/40 dark:text-[#FDE68A] border border-[#FDE68A] dark:border-[#92400E]">
+                Fallback Engine
+              </span>
+            )}
+          </div>
         </div>
 
         <div className="flex items-center gap-3 w-full sm:w-auto justify-end">

@@ -1,4 +1,5 @@
 import { StyleAnalysisResult, AspectRatio, BackgroundPropObject } from '../types';
+import { getAuthHeaders } from './authService';
 
 // Helper to convert image URL or File to base64
 export async function imageToBase64(imageSrc: string, file?: File | null): Promise<{ base64: string; mimeType: string }> {
@@ -427,6 +428,7 @@ export async function analyzeImageStyle(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...getAuthHeaders(),
       },
       body: JSON.stringify({
         imageBase64: base64,

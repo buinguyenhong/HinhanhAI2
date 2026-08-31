@@ -1,24 +1,177 @@
-import express from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
 import dotenv from 'dotenv';
+import cookieParser from 'cookie-parser';
+import jwt from 'jsonwebtoken';
+import rateLimit from 'express-rate-limit';
+import { z } from 'zod';
 
 dotenv.config();
 
 const app = express();
 const PORT = 3000;
 
-// Increase payload limit for base64 image data
+// Configuration & Environment Variables
+const APP_PASSWORD = process.env.APP_PASSWORD || 'admin';
+const JWT_SECRET = process.env.JWT_SECRET || 'hinhanhai-production-secure-jwt-secret-key-2026';
+const OPENAI_ALLOWED_DOMAINS = (
+  process.env.OPENAI_ALLOWED_DOMAINS || 'api.openai.com,api.together.xyz,api.groq.com,openrouter.ai'
+)
+  .split(',')
+  .map((d) => d.trim().toLowerCase())
+  .filter(Boolean);
+
+// Middlewares
+app.use(cookieParser());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// Health check endpoint
+// --- RATE LIMITERS ---
+// 1. General rate limiter for all /api/ endpoints (lighter)
+const apiLimiter = rateLimit({
+  windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
+  max: Number(process.env.RATE_LIMIT_MAX) || 150, // limit each IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: 'Bạn đã gửi quá nhiều yêu cầu đến hệ thống. Vui lòng thử lại sau ít phút.',
+  },
+});
+
+// 2. Strict rate limiter for AI-intensive generation & style analysis endpoints
+const aiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: Number(process.env.AI_RATE_LIMIT_MAX) || 20, // limit each IP to 20 AI requests / 15 mins
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: 'Bạn đã đạt giới hạn yêu cầu AI (tối đa 20 yêu cầu / 15 phút). Vui lòng thử lại sau.',
+  },
+});
+
+// 3. Login attempt rate limiter
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 15,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: 'Đã thử đăng nhập quá nhiều lần. Vui lòng đợi 15 phút trước khi thử lại.',
+  },
+});
+
+// Apply general API rate limiting to all /api routes
+app.use('/api', apiLimiter);
+
+// --- AUTHENTICATION MIDDLEWARE ---
+export interface AuthenticatedRequest extends Request {
+  user?: any;
+}
+
+function requireAuth(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+  let token: string | undefined;
+
+  // 1. Check Authorization header: Bearer <token>
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    token = authHeader.substring(7).trim();
+  }
+
+  // 2. Check httpOnly cookie
+  if (!token && req.cookies && req.cookies.auth_token) {
+    token = req.cookies.auth_token;
+  }
+
+  if (!token) {
+    return res.status(401).json({
+      error: 'Yêu cầu xác thực. Vui lòng đăng nhập để tiếp tục.',
+      code: 'UNAUTHORIZED',
+    });
+  }
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.user = decoded;
+    next();
+  } catch (err: any) {
+    return res.status(401).json({
+      error: 'Mã xác thực đã hết hạn hoặc không hợp lệ. Vui lòng đăng nhập lại.',
+      code: 'INVALID_TOKEN',
+    });
+  }
+}
+
+// --- PUBLIC ENDPOINTS ---
+
+// 1. Health check endpoint (Public)
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Lazy-initialized Gemini Client
+// 2. Login validation schema
+const loginSchema = z.object({
+  password: z.string().min(1, 'Mật khẩu không được để trống').max(200, 'Mật khẩu quá dài'),
+});
+
+// POST /api/login (Public with loginLimiter)
+app.post('/api/login', loginLimiter, (req, res) => {
+  const parsed = loginSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({
+      error: 'Dữ liệu không hợp lệ',
+      details: parsed.error.issues.map((i) => i.message).join(', '),
+    });
+  }
+
+  const { password } = parsed.data;
+
+  // Constant-time like comparison or direct string equality check
+  if (password !== APP_PASSWORD) {
+    return res.status(401).json({
+      error: 'Mã truy cập không hợp lệ. Vui lòng kiểm tra lại.',
+    });
+  }
+
+  // Issue 12-hour JWT
+  const token = jwt.sign(
+    {
+      authenticated: true,
+      role: 'user',
+      issuedAt: new Date().toISOString(),
+    },
+    JWT_SECRET,
+    {
+      expiresIn: '12h',
+    }
+  );
+
+  // Set secure httpOnly cookie
+  res.cookie('auth_token', token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'strict',
+    maxAge: 12 * 60 * 60 * 1000, // 12 hours
+  });
+
+  return res.json({
+    success: true,
+    token,
+    expiresIn: '12h',
+  });
+});
+
+// --- PROTECTED API MIDDLEWARE ROUTING ---
+// Protect all remaining /api/* endpoints with requireAuth
+app.use('/api', (req, res, next) => {
+  if (req.path === '/health' || req.path === '/login') {
+    return next();
+  }
+  return requireAuth(req, res, next);
+});
+
+// --- LAZY-INITIALIZED GEMINI CLIENT ---
 let geminiClient: GoogleGenAI | null = null;
 function getGeminiClient(): GoogleGenAI | null {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -38,14 +191,47 @@ function getGeminiClient(): GoogleGenAI | null {
   return geminiClient;
 }
 
-// Endpoint: AI Image Style, Background, Lighting & Composition Analyzer
-app.post('/api/gemini/analyze-style', async (req, res) => {
-  try {
-    const { imageBase64, mimeType = 'image/jpeg', userFocus } = req.body;
+// --- ZOD INPUT VALIDATION SCHEMAS ---
 
-    if (!imageBase64) {
-      return res.status(400).json({ error: 'imageBase64 is required' });
+const analyzeStyleSchema = z.object({
+  imageBase64: z.string().min(1, 'Ảnh phân tích không được để trống'),
+  mimeType: z.string().max(100).optional().default('image/jpeg'),
+  userFocus: z.string().max(2000).optional().nullable(),
+});
+
+const generateImageSchema = z.object({
+  prompt: z
+    .string()
+    .min(1, 'Prompt không được để trống')
+    .max(4000, 'Prompt không được vượt quá 4000 ký tự'),
+  negativePrompt: z.string().max(2000).optional().nullable(),
+  aspectRatio: z
+    .enum(['original', '1:1', '16:9', '9:16', '4:3', '3:2', '21:9', '3:4', '2:3'])
+    .default('1:1'),
+  variations: z.number().int().min(1, 'Tối thiểu 1 biến thể').max(4, 'Tối đa 4 biến thể').default(1),
+  quality: z.enum(['standard', 'high', 'raw']).optional().default('high'),
+  seed: z.string().max(50).optional().default('-1'),
+  model: z.string().max(150).optional(),
+  provider: z.enum(['gemini', 'openai', 'custom']).optional().default('gemini'),
+  customApiKey: z.string().max(500).optional().nullable(),
+  customEndpoint: z.string().max(500).optional().nullable(),
+  customHeaders: z.record(z.string(), z.string()).optional().nullable(),
+  sourceImageBase64: z.string().optional().nullable(),
+  referenceImageBase64: z.string().optional().nullable(),
+});
+
+// Endpoint: AI Image Style, Background, Lighting & Composition Analyzer
+app.post('/api/gemini/analyze-style', aiLimiter, async (req, res) => {
+  try {
+    const parsed = analyzeStyleSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        error: 'Dữ liệu đầu vào không hợp lệ',
+        details: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join(', '),
+      });
     }
+
+    const { imageBase64, mimeType = 'image/jpeg', userFocus } = parsed.data;
 
     const ai = getGeminiClient();
     if (!ai) {
@@ -317,26 +503,54 @@ function mapAspectRatioToStandard(ratio: string): '1:1' | '16:9' | '9:16' | '4:3
 }
 
 // Endpoint: AI Image Generation (Gemini 3.1 Flash Image, Imagen 3, OpenAI, or Live Generative Engine)
-app.post('/api/generate-image', async (req, res) => {
+app.post('/api/generate-image', aiLimiter, async (req, res) => {
   try {
+    const parsed = generateImageSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        error: 'Dữ liệu đầu vào không hợp lệ',
+        details: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join(', '),
+        success: false,
+      });
+    }
+
     const {
       prompt,
       negativePrompt,
       aspectRatio = '1:1',
       variations = 1,
       quality = 'high',
-      seed,
-      model = 'gemini-3.1-flash-image',
+      seed = '-1',
       sourceImageBase64,
       referenceImageBase64,
       customApiKey,
       provider = 'gemini',
       customEndpoint,
-      customHeaders,
-    } = req.body;
+    } = parsed.data;
 
-    if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
-      return res.status(400).json({ error: 'Prompt is required' });
+    // Validate customEndpoint domain against allowlist if provided
+    if (customEndpoint) {
+      try {
+        const parsedUrl = new URL(customEndpoint);
+        const hostname = parsedUrl.hostname.toLowerCase();
+        const isAllowed = OPENAI_ALLOWED_DOMAINS.some(
+          (allowed) => hostname === allowed || hostname.endsWith(`.${allowed}`)
+        );
+
+        if (!isAllowed) {
+          return res.status(400).json({
+            error: `Tên miền endpoint '${hostname}' không nằm trong danh sách được phép. Chỉ cho phép các domain: ${OPENAI_ALLOWED_DOMAINS.join(
+              ', '
+            )}`,
+            success: false,
+          });
+        }
+      } catch (urlErr) {
+        return res.status(400).json({
+          error: 'customEndpoint không phải là một URL hợp lệ.',
+          success: false,
+        });
+      }
     }
 
     const trimmedPrompt = prompt.trim();
@@ -346,7 +560,12 @@ app.post('/api/generate-image', async (req, res) => {
     const count = Math.min(Math.max(Number(variations) || 1, 1), 4);
     const baseSeed = seed && seed !== '-1' ? parseInt(seed, 10) : Math.floor(Math.random() * 900000) + 100000;
 
-    const generatedImages: { url: string; seed: string; modelUsed: string }[] = [];
+    const generatedImages: {
+      url: string;
+      seed: string;
+      modelUsed: string;
+      isFallbackEngine: boolean;
+    }[] = [];
 
     // 1. Try Gemini / Imagen if provider is gemini or default
     const geminiKey = customApiKey || process.env.GEMINI_API_KEY;
@@ -410,6 +629,7 @@ app.post('/api/generate-image', async (req, res) => {
                   url: `data:${mime};base64,${part.inlineData.data}`,
                   seed: itemSeed,
                   modelUsed: 'Google Gemini 3.1 Flash Image',
+                  isFallbackEngine: false,
                 });
                 imageSuccess = true;
                 break;
@@ -417,8 +637,8 @@ app.post('/api/generate-image', async (req, res) => {
             }
           }
         } catch (flashErr: any) {
-          // Free tier has quota limit 0 for gemini-3.1-flash-image; fallback to Flux.1 neural synthesizer
-          console.log('Gemini 3.1 flash image not available or quota limit 0, using Flux.1 AI synthesis');
+          // Free tier has quota limit 0 for gemini-3.1-flash-image; fallback to synthesis engine
+          console.log('Gemini 3.1 flash image not available or quota limit 0, using fallback synthesis');
         }
       }
     }
@@ -454,6 +674,7 @@ app.post('/api/generate-image', async (req, res) => {
             url: data.data[0].url,
             seed: baseSeed.toString(),
             modelUsed: 'OpenAI DALL-E 3',
+            isFallbackEngine: false,
           });
         }
       } catch (openAiErr: any) {
@@ -461,8 +682,8 @@ app.post('/api/generate-image', async (req, res) => {
       }
     }
 
-    // 3. High-Quality Real-time AI Generation Engine (generates real AI images based on exact prompt & seed)
-    // Ensures users always see genuinely synthesized images matching their exact prompt text
+    // 3. Fallback Engine (Pollinations): Used when primary Gemini and OpenAI are unavailable
+    // Transparently tagged with modelUsed and isFallbackEngine: true
     if (generatedImages.length === 0) {
       let width = 1024;
       let height = 1024;
@@ -482,7 +703,7 @@ app.post('/api/generate-image', async (req, res) => {
 
       for (let i = 0; i < count; i++) {
         const itemSeed = baseSeed + i * 941;
-        // Construct real-time generative neural synthesis URL from the user's exact prompt
+        // Construct neural synthesis URL from the user's exact prompt
         const encodedPrompt = encodeURIComponent(
           `${trimmedPrompt}, masterpiece, highly detailed, photorealistic, 8k resolution, cinematic lighting${
             negativePrompt ? `, avoid ${negativePrompt}` : ''
@@ -493,7 +714,8 @@ app.post('/api/generate-image', async (req, res) => {
         generatedImages.push({
           url: liveAiUrl,
           seed: itemSeed.toString(),
-          modelUsed: 'Flux.1 Schnell AI Neural Synthesis (Live Render)',
+          modelUsed: 'Public Fallback Engine (Pollinations)',
+          isFallbackEngine: true,
         });
       }
     }

@@ -12,27 +12,26 @@ import { EditorView } from './components/editor/EditorView';
 import { HistoryView } from './components/history/HistoryView';
 import { DashboardView } from './components/dashboard/DashboardView';
 import { SettingsView } from './components/settings/SettingsView';
+import { isUserAuthenticated, clearAuthToken } from './services/authService';
 
 function AppContent() {
   const { theme } = useTheme();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [activeTab, setActiveTab] = useState<ActiveTab>('editor');
 
-  // Check login state from LocalStorage on mount
+  // Check login state on mount
   useEffect(() => {
-    const isLogged = localStorage.getItem('ai_studio_auth') === 'true';
-    if (isLogged) {
+    if (isUserAuthenticated()) {
       setIsAuthenticated(true);
     }
   }, []);
 
   const handleLogin = () => {
     setIsAuthenticated(true);
-    localStorage.setItem('ai_studio_auth', 'true');
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('ai_studio_auth');
+    clearAuthToken();
     setIsAuthenticated(false);
   };
 
