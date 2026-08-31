@@ -147,6 +147,23 @@
 | Timeout 1.6 min | Proxy chậm không abort | `fetchWithTimeout` 60s/90s (0eeab63). |
 | 404 image route | `1endpoint.dev` không có `/images/generations` | Thử 3 paths + message rõ (e846c68) + `/api/test-profile` (e846c68). |
 
+### 0A.11. Unsplash — đã đánh giá, KHÔNG tích hợp
+
+User hỏi dùng Unsplash làm provider sinh ảnh. Đã tra docs (https://unsplash.com/documentation).
+
+**Kết luận:** Không phù hợp với mục tiêu "AI Image Studio".
+
+| Đặc điểm | Unsplash | Đánh giá |
+|---|---|---|
+| Bản chất | Thư viện ảnh stock có sẵn | ❌ Không phải AI generation. |
+| Endpoint sinh ảnh | `GET /photos/random?query=<keyword>` trả ảnh match keyword | ❌ Không có `/images/generations`. |
+| Vision / analyze | Không hỗ trợ | ❌ Không dùng cho analyze. |
+| Auth | `Authorization: Client-ID <ACCESS_KEY>` | ✅ Có key nhưng flow khác (không phải Bearer). |
+| Rate limit | Demo 50/h, production 1000/h | ⚠️ Demo rất thấp. |
+| Nội dung ảnh | Ảnh người thật, sẵn có | ❌ User muốn generate mới, không muốn ảnh stock. |
+
+**Quyết định:** Không tích hợp. Nếu sau này cần stock photo → làm endpoint riêng `/api/unsplash-search` (sandbox), không gộp vào generate-image flow.
+
 ---
 
 ## 0B. COMMIT ĐẦU TIÊN — REFACTOR MULTI-PROVIDER (commit `089e50b`)
