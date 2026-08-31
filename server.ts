@@ -27,8 +27,11 @@ if (isProduction && (!APP_PASSWORD || !JWT_SECRET)) {
   process.exit(1);
 }
 
+// (legacy) OPENAI_ALLOWED_DOMAINS — không còn dùng để chặn SSRF.
+// Người dùng tự chịu trách nhiệm chọn endpoint OpenAI-compatible tin cậy.
+// Vẫn đọc để không vỡ env cũ trên Render, nhưng không áp dụng nữa.
 const OPENAI_ALLOWED_DOMAINS = (
-  process.env.OPENAI_ALLOWED_DOMAINS || 'api.openai.com,api.together.xyz,api.groq.com,openrouter.ai'
+  process.env.OPENAI_ALLOWED_DOMAINS || ''
 )
   .split(',')
   .map((d) => d.trim().toLowerCase())
@@ -562,28 +565,19 @@ const generateImageSchema = z.object({
   referenceImageBase64: z.string().optional().nullable(),
 });
 
-// Helper: validate custom endpoint hostname against allowlist (SSRF guard)
-function validateCustomEndpoint(rawEndpoint: string, provider: string): { ok: boolean; hostname?: string; error?: string } {
-  // Gemini uses SDK with key; customEndpoint not used by SDK — skip allowlist entirely for gemini.
-  if (provider === 'gemini') return { ok: true };
-
-  let parsedUrl: URL;
+// Helper: validate custom endpoint URL shape only.
+// Note: SSRF allowlist removed per user request — người dùng tự chịu trách nhiệm
+// chọn endpoint OpenAI-compatible tin cậy. Chỉ check URL h�p lệ.
+function validateCustomEndpoint(rawEndpoint: string): { ok: boolean; hostname?: string; error?: string } {
   try {
-    parsedUrl = new URL(rawEndpoint);
+    const parsedUrl = new URL(rawEndpoint);
+    if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+      return { ok: false, error: 'apiEndpoint phải bắt đầu bằng http:// hoặc https://' };
+    }
+    return { ok: true, hostname: parsedUrl.hostname.toLowerCase() };
   } catch {
     return { ok: false, error: 'apiEndpoint không phải là một URL hợp lệ.' };
   }
-  const hostname = parsedUrl.hostname.toLowerCase();
-  const isAllowed = OPENAI_ALLOWED_DOMAINS.some(
-    (allowed) => hostname === allowed || hostname.endsWith(`.${allowed}`)
-  );
-  if (!isAllowed) {
-    return {
-      ok: false,
-      error: `Tên miền endpoint '${hostname}' không nằm trong danh sách được phép. Chỉ cho phép: ${OPENAI_ALLOWED_DOMAINS.join(', ')}`,
-    };
-  }
-  return { ok: true, hostname };
 }
 
 // Endpoint: AI Image Style, Background, Lighting & Composition Analyzer (multi-provider)
@@ -615,9 +609,9 @@ app.post('/api/gemini/analyze-style', aiLimiter, async (req, res) => {
       });
     }
 
-    // Allowlist validation (only for non-gemini)
+    // URL shape validation (no allowlist — user chooses trusted OpenAI-compatible endpoint)
     if (apiEndpoint) {
-      const v = validateCustomEndpoint(apiEndpoint, provider);
+      const v = validateCustomEndpoint(apiEndpoint);
       if (!v.ok) {
         return res.status(400).json({ error: v.error, success: false });
       }
@@ -872,9 +866,9 @@ app.post('/api/generate-image', aiLimiter, async (req, res) => {
       });
     }
 
-    // Allowlist validation
+    // URL shape validation (no allowlist)
     if (apiEndpoint) {
-      const v = validateCustomEndpoint(apiEndpoint, provider);
+      const v = validateCustomEndpoint(apiEndpoint);
       if (!v.ok) {
         return res.status(400).json({ error: v.error, success: false });
       }

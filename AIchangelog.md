@@ -15,7 +15,7 @@
 - Tách 3 hàm provider-specific: `analyzeWithGemini`, `analyzeWithOpenAI`, `analyzeWithAnthropic` (vision đa phương thức qua OpenAI `image_url` / Anthropic `image` block).
 - `/api/gemini/analyze-style`: nhận `provider`/`model`/`apiKey`/`apiEndpoint`; resolve key (gemini dùng `GEMINI_API_KEY` nếu rỗng); trả `{ fallback: true }` nếu lỗi.
 - `/api/generate-image`: đổi `provider` enum thành `['gemini','openai','anthropic']`, **bỏ hoàn toàn Pollinations fallback**; tách `generateWithGemini`/`generateWithOpenAI`; Anthropic → trả lỗi "không hỗ trợ sinh ảnh"; không có ảnh → trả lỗi rõ ràng.
-- `validateCustomEndpoint()`: helper SSRF guard — `gemini` skip allowlist (dùng SDK), chỉ check `openai`/`anthropic`.
+- `validateCustomEndpoint()`: chỉ check URL hợp lệ (http/https). Đã **bỏ SSRF allowlist** theo yêu cầu người dùng — endpoint OpenAI-compatible tự do (1endpoint.dev, Together, Groq, OpenRouter, v.v.).
 - Encoding sạch (UTF-8 no BOM), không còn mojibake.
 
 **Services (`src/services/`):**
@@ -117,8 +117,9 @@
 - **Đã xử lý:** file ở working tree đã sạch encoding (UTF-8 no BOM, tiếng Việt hiển thị đúng). Commit refactor (mục 0) sẽ gộp bản sửa và push lên remote để overwrite commit mojibake `089b5cf`.
 - **Quy tắc tránh tái phạm:** KHÔNG dùng PowerShell đọc/ghi file code (mặc định ANSI). Chỉ dùng read/edit/write tool hoặc `node`. File code giữ UTF-8 **không BOM**.
 
-### 5.2. ✅ Allowlist chặn nhầm Gemini endpoint
-- **Đã xử lý:** `validateCustomEndpoint()` trong `server.ts` skip allowlist khi `provider === 'gemini'` (vì gemini dùng SDK + key, không dùng `apiEndpoint` để route). Chỉ áp allowlist cho `openai`/`anthropic` (chống SSRF).
+### 5.2. ✅ Allowlist chặn nhầm Gemini endpoint & các endpoint OpenAI-compatible khác
+- **Vấn đề mở rộng:** allowlist chỉ có 4 domain — chặn cả Gemini (dùng SDK) lẫn các OpenAI-compatible proxy khác (VD: 1endpoint.dev).
+- **Đã xử lý (yêu cầu người dùng):** **bỏ hoàn toàn SSRF allowlist**. `validateCustomEndpoint()` chỉ check URL hợp lệ (http/https). Người dùng tự chịu trách nhiệm chọn endpoint OpenAI-compatible tin cậy.
 
 ### 5.3. ✅ Refactor multi-provider các file còn lại
 - Tất cả file UI/service đã được cập nhật theo schema mới (`renderProfileId`/`analyzeProfileId`, `role`, `renderModel`, `analyzeModel`). Xem chi tiết mục 0 và mục 3.2.

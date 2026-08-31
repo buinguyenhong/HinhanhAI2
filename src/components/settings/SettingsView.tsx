@@ -999,7 +999,7 @@ export const SettingsView: React.FC = () => {
                 />
                 {formProvider !== 'gemini' && (
                   <p className="text-[10px] text-[#9C988F] dark:text-[#5E5D57] italic">
-                    Endpoint phải nằm trong allowlist domain (OPENAI_ALLOWED_DOMAINS) để chống SSRF.
+                    Nhập endpoint OpenAI-compatible bất kỳ (VD: 1endpoint.dev, api.together.xyz, OpenRouter...).
                   </p>
                 )}
               </div>
