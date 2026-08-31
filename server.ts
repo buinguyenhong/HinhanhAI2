@@ -11,11 +11,22 @@ import { z } from 'zod';
 dotenv.config();
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
+app.set('trust proxy', 1);
 
 // Configuration & Environment Variables
-const APP_PASSWORD = process.env.APP_PASSWORD || 'admin';
-const JWT_SECRET = process.env.JWT_SECRET || 'hinhanhai-production-secure-jwt-secret-key-2026';
+const isProduction = process.env.NODE_ENV === 'production';
+const APP_PASSWORD = process.env.APP_PASSWORD || (isProduction ? '' : 'admin');
+const JWT_SECRET =
+  process.env.JWT_SECRET || (isProduction ? '' : 'hinhanhai-local-development-jwt-secret');
+
+if (isProduction && (!APP_PASSWORD || !JWT_SECRET)) {
+  console.error(
+    'Production configuration error: APP_PASSWORD and JWT_SECRET environment variables are required.'
+  );
+  process.exit(1);
+}
+
 const OPENAI_ALLOWED_DOMAINS = (
   process.env.OPENAI_ALLOWED_DOMAINS || 'api.openai.com,api.together.xyz,api.groq.com,openrouter.ai'
 )

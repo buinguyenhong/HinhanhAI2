@@ -103,9 +103,6 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
               )}
             </button>
 
-            <p className="text-[10px] text-[#9C988F] dark:text-[#3E3D38] tracking-wide text-center">
-              Mã truy cập mặc định: <span className="text-[#6E6B64] dark:text-[#5E5D57] font-mono font-medium">admin</span>
-            </p>
           </div>
         </form>
       </div>
