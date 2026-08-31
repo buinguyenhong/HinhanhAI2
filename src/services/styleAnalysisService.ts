@@ -415,6 +415,130 @@ export async function generateIntelligentVisualAnalysis(
   };
 }
 
+// Normalize analysis payload from any provider into our internal StyleAnalysisResult shape.
+// Some providers (or custom endpoints) may return slightly different key names;
+// we accept multiple aliases and fill missing required fields with safe defaults.
+function pickString(...vals: any[]): string {
+  for (const v of vals) {
+    if (typeof v === 'string' && v.trim()) return v;
+  }
+  return '';
+}
+
+function normalizeAnalysis(raw: any): StyleAnalysisResult {
+  const bg = raw?.background || {};
+  const lighting = raw?.lighting || {};
+  const camera = raw?.camera || {};
+  const palette = raw?.colorPalette || raw?.color_palette || {};
+  const subject = raw?.subjectDetails || raw?.subject_details || {};
+
+  // Props may live under different keys (objectsAndProps, objects_and_props, props)
+  const propsRaw =
+    bg.objectsAndProps ||
+    bg.objects_and_props ||
+    bg.props ||
+    [];
+  const props: BackgroundPropObject[] = Array.isArray(propsRaw)
+    ? propsRaw
+        .filter((p: any) => p && typeof p === 'object')
+        .map((p: any) => ({
+          name: pickString(p.name, p.title),
+          category: p.category,
+          description: p.description,
+          promptSnippet: pickString(p.promptSnippet, p.prompt_snippet, p.snippet),
+        }))
+    : [];
+
+  const elementsRaw = bg.elements || bg.props_list || [];
+  const elements: string[] = Array.isArray(elementsRaw)
+    ? elementsRaw.filter((e: any) => typeof e === 'string')
+    : [];
+
+  const materialsRaw = bg.materials || [];
+  const materials: string[] = Array.isArray(materialsRaw)
+    ? materialsRaw.filter((m: any) => typeof m === 'string')
+    : [];
+
+  const hexRaw = palette.hexColors || palette.hex_colors || [];
+  const hexColors = Array.isArray(hexRaw)
+    ? hexRaw
+        .filter((c: any) => c && typeof c === 'object')
+        .map((c: any) => ({
+          hex: pickString(c.hex, c.color, c.value),
+          name: pickString(c.name, c.label),
+          role: pickString(c.role, c.description),
+        }))
+        .filter((c: any) => c.hex)
+    : [];
+
+  const tagsRaw = raw?.keyTags || raw?.key_tags || raw?.tags || [];
+  const keyTags: string[] = Array.isArray(tagsRaw)
+    ? tagsRaw.filter((t: any) => typeof t === 'string')
+    : [];
+
+  const result: StyleAnalysisResult = {
+    styleName: pickString(raw?.styleName, raw?.style_name, raw?.overallArtStyleAesthetic?.name, raw?.name, 'Phong cách thị giác'),
+    genre: pickString(raw?.genre, raw?.category, 'Phân tích hình ảnh'),
+    styleDescription: pickString(
+      raw?.styleDescription,
+      raw?.style_description,
+      raw?.overallArtStyleAesthetic?.description,
+      raw?.description,
+      'Phân tích thị giác từ AI Studio.'
+    ),
+    lighting: {
+      sourceType: pickString(lighting.sourceType, lighting.source_type, lighting.source),
+      direction: pickString(lighting.direction, lighting.dir),
+      colorTemperature: pickString(lighting.colorTemperature, lighting.color_temperature, lighting.temp),
+      quality: pickString(lighting.quality),
+      detailedAnalysis: pickString(lighting.detailedAnalysis, lighting.detailed_analysis, lighting.analysis),
+      promptSnippetEn: lighting.promptSnippetEn || lighting.prompt_snippet_en,
+      promptSnippetVi: lighting.promptSnippetVi || lighting.prompt_snippet_vi,
+    },
+    background: {
+      settingType: pickString(bg.settingType, bg.setting_type, bg.setting),
+      architecturalStyle: pickString(bg.architecturalStyle, bg.architectural_style, bg.architecture),
+      depthOfField: pickString(bg.depthOfField, bg.depth_of_field, bg.dof),
+      elements: elements.length ? elements : ['Phân tích bối cảnh'],
+      objectsAndProps: props,
+      materials: materials,
+      atmosphere: pickString(bg.atmosphere, bg.mood),
+      detailedAnalysis: pickString(bg.detailedAnalysis, bg.detailed_analysis, bg.analysis),
+      promptSnippetEn: bg.promptSnippetEn || bg.prompt_snippet_en,
+      promptSnippetVi: bg.promptSnippetVi || bg.prompt_snippet_vi,
+    },
+    camera: {
+      shotType: pickString(camera.shotType, camera.shot_type, camera.shot),
+      lensSuggestion: pickString(camera.lensSuggestion, camera.lens_suggestion, camera.lens),
+      compositionRule: pickString(camera.compositionRule, camera.composition_rule, camera.composition),
+      detailedAnalysis: pickString(camera.detailedAnalysis, camera.detailed_analysis, camera.analysis),
+      promptSnippetEn: camera.promptSnippetEn || camera.prompt_snippet_en,
+      promptSnippetVi: camera.promptSnippetVi || camera.prompt_snippet_vi,
+    },
+    colorPalette: {
+      dominantMood: pickString(palette.dominantMood, palette.dominant_mood, palette.mood),
+      hexColors: hexColors,
+      colorGrading: pickString(palette.colorGrading, palette.color_grading, palette.grading),
+      promptSnippetEn: palette.promptSnippetEn || palette.prompt_snippet_en,
+      promptSnippetVi: palette.promptSnippetVi || palette.prompt_snippet_vi,
+    },
+    subjectDetails: {
+      subjectType: pickString(subject.subjectType, subject.subject_type, subject.subject),
+      poseAndExpression: pickString(subject.poseAndExpression, subject.pose_and_expression, subject.pose),
+      texturesAndMaterials: pickString(subject.texturesAndMaterials, subject.textures_and_materials, subject.textures),
+      promptSnippetEn: subject.promptSnippetEn || subject.prompt_snippet_en,
+      promptSnippetVi: subject.promptSnippetVi || subject.prompt_snippet_vi,
+    },
+    recommendedPromptEn: pickString(raw?.recommendedPromptEn, raw?.recommended_prompt_en, raw?.masterPromptEn, raw?.master_prompt_en, ''),
+    recommendedPromptVi: pickString(raw?.recommendedPromptVi, raw?.recommended_prompt_vi, raw?.masterPromptVi, raw?.master_prompt_vi, ''),
+    negativePrompt: pickString(raw?.negativePrompt, raw?.negative_prompt, ''),
+    suggestedAspectRatio: (raw?.suggestedAspectRatio || raw?.suggested_aspect_ratio || '4:3') as AspectRatio,
+    keyTags: keyTags,
+  };
+
+  return result;
+}
+
 // Main API analysis function: Tries backend (multi-provider) first, gracefully falls back to intelligent visual engine
 export async function analyzeImageStyle(
   imageSrc: string,
@@ -451,11 +575,15 @@ export async function analyzeImageStyle(
     if (response.ok) {
       const data = await response.json();
       if (data.success && data.analysis) {
-        return {
-          ...data.analysis,
-          analyzedAt: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-          sourceImagePreview: imageSrc,
-        };
+        try {
+          return {
+            ...normalizeAnalysis(data.analysis),
+            analyzedAt: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+            sourceImagePreview: imageSrc,
+          };
+        } catch (normErr) {
+          console.warn('Failed to normalize analysis payload, using visual engine:', normErr);
+        }
       }
     }
   } catch (err) {
