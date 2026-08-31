@@ -413,7 +413,8 @@ async function analyzeWithGemini(opts: {
 
   if (response && response.text) {
     const resultJson = JSON.parse(response.text || '{}');
-    return { analysis: resultJson, source: usedModel };
+    const compliant = await ensureCompliantAnalysis(resultJson, opts.apiKey);
+    return { analysis: compliant, source: usedModel };
   }
   throw new Error(`Gemini model ${opts.model} did not return a valid response.`);
 }
@@ -468,7 +469,8 @@ async function analyzeWithOpenAI(opts: {
   const data: any = await response.json();
   const content = data?.choices?.[0]?.message?.content;
   if (!content) throw new Error('OpenAI returned empty content.');
-  const analysis = typeof content === 'string' ? JSON.parse(content) : content;
+  let analysis = typeof content === 'string' ? JSON.parse(content) : content;
+  analysis = await ensureCompliantAnalysis(analysis);
   return { analysis, source: opts.model };
 }
 
@@ -529,8 +531,118 @@ async function analyzeWithAnthropic(opts: {
   if (!content) throw new Error('Anthropic returned empty content.');
   const jsonMatch = content.match(/\{[\s\S]*\}/);
   if (!jsonMatch) throw new Error('Anthropic response did not contain a JSON object.');
-  const analysis = JSON.parse(jsonMatch[0]);
+  let analysis = JSON.parse(jsonMatch[0]);
+  analysis = await ensureCompliantAnalysis(analysis);
   return { analysis, source: opts.model };
+}
+
+// --- SCHEMA NORMALIZER ---
+// Some models / proxies return JSON with slightly different key names (snake_case,
+// custom groupings like `overallArtStyleAesthetic`, or even plain prose).
+// Strategy:
+//   1) If payload already contains all required fields, pass through (zero cost).
+//   2) Otherwise call a small/fast Gemini (gemini-3.1-flash-lite) to map it into
+//      our strict schema. This is the only path that costs an extra LLM call.
+// Toggle via env `ANALYZE_NORMALIZER_ENABLED` (default 'true').
+const REQUIRED_ANALYSIS_FIELDS = [
+  'styleName',
+  'genre',
+  'styleDescription',
+  'lighting',
+  'background',
+  'camera',
+  'colorPalette',
+  'subjectDetails',
+  'recommendedPromptEn',
+  'recommendedPromptVi',
+  'negativePrompt',
+  'suggestedAspectRatio',
+  'keyTags',
+];
+
+function looksLikeCompliantAnalysis(payload: any): boolean {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return false;
+  for (const f of REQUIRED_ANALYSIS_FIELDS) {
+    if (!(f in payload)) return false;
+  }
+  // Spot-check nested shapes
+  const bg = payload.background || {};
+  const light = payload.lighting || {};
+  if (typeof light.sourceType !== 'string') return false;
+  if (typeof bg.settingType !== 'string') return false;
+  return true;
+}
+
+async function normalizeAnalysisViaGemini(raw: any, apiKey: string): Promise<any> {
+  const ai = new GoogleGenAI({
+    apiKey,
+    httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
+  });
+  // Truncate huge payloads to avoid token blow-up
+  let rawText = typeof raw === 'string' ? raw : JSON.stringify(raw);
+  if (rawText.length > 12000) rawText = rawText.slice(0, 12000) + '\n...[truncated]';
+
+  const prompt =
+    `You are a strict JSON normalizer. The following payload came from an arbitrary\n` +
+    `vision model. Map it into EXACTLY the schema below. Preserve all real content;\n` +
+    `do not invent facts. If a field is genuinely absent, use a sensible empty\n` +
+    `string or empty array. Respond with a SINGLE valid JSON object and nothing else.\n\n` +
+    `=== RAW PAYLOAD ===\n${rawText}\n\n` +
+    `=== TARGET SCHEMA (TypeScript-style) ===\n` +
+    `{\n` +
+    `  styleName: string,\n` +
+    `  genre: string,\n` +
+    `  styleDescription: string,\n` +
+    `  lighting: { sourceType: string, direction: string, colorTemperature: string, quality: string, detailedAnalysis: string, promptSnippetEn?: string, promptSnippetVi?: string },\n` +
+    `  background: { settingType: string, architecturalStyle?: string, depthOfField: string, elements: string[], objectsAndProps?: Array<{name:string, category?:string, description?:string, promptSnippet?:string}>, materials?: string[], atmosphere?: string, detailedAnalysis: string, promptSnippetEn?: string, promptSnippetVi?: string },\n` +
+    `  camera: { shotType: string, lensSuggestion: string, compositionRule: string, detailedAnalysis: string, promptSnippetEn?: string, promptSnippetVi?: string },\n` +
+    `  colorPalette: { dominantMood: string, hexColors: Array<{hex:string, name:string, role:string}>, colorGrading: string, promptSnippetEn?: string, promptSnippetVi?: string },\n` +
+    `  subjectDetails: { subjectType: string, poseAndExpression: string, texturesAndMaterials: string, promptSnippetEn?: string, promptSnippetVi?: string },\n` +
+    `  recommendedPromptEn: string,\n` +
+    `  recommendedPromptVi: string,\n` +
+    `  negativePrompt: string,\n` +
+    `  suggestedAspectRatio: string,\n` +
+    `  keyTags: string[]\n` +
+    `}`;
+
+  const response = await ai.models.generateContent({
+    model: 'gemini-3.1-flash-lite',
+    contents: { parts: [{ text: prompt }] },
+    config: {
+      responseMimeType: 'application/json',
+      responseSchema: ANALYSIS_RESPONSE_SCHEMA,
+    },
+  });
+  if (!response?.text) throw new Error('Normalizer returned empty response.');
+  return JSON.parse(response.text);
+}
+
+async function ensureCompliantAnalysis(
+  raw: any,
+  normalizerKey?: string | null
+): Promise<any> {
+  if (looksLikeCompliantAnalysis(raw)) return raw;
+
+  const enabled = (process.env.ANALYZE_NORMALIZER_ENABLED || 'true').toLowerCase() !== 'false';
+  if (!enabled) {
+    // Pass-through with minimal sanity guards; client-side normalize will still run.
+    return raw && typeof raw === 'object' ? raw : {};
+  }
+
+  const key = normalizerKey || process.env.GEMINI_API_KEY;
+  if (!key) {
+    console.warn('Analysis payload is non-compliant and no normalizer key available; returning raw.');
+    return raw && typeof raw === 'object' ? raw : {};
+  }
+
+  try {
+    console.warn('Analysis payload non-compliant — invoking server-side normalizer (Gemini flash-lite).');
+    const normalized = await normalizeAnalysisViaGemini(raw, key);
+    return normalized;
+  } catch (normErr: any) {
+    console.error('Server-side normalizer failed:', normErr?.message);
+    return raw && typeof raw === 'object' ? raw : {};
+  }
 }
 
 // --- ZOD INPUT VALIDATION SCHEMAS ---

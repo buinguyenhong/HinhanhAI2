@@ -72,6 +72,7 @@ Xem `.env.example`:
 - `APP_PASSWORD` — mật khẩu đăng nhập (mặc định local: `admin`; production bắt buộc set).
 - `JWT_SECRET` — khóa ký JWT (production bắt buộc set; local có giá trị dev).
 - `OPENAI_ALLOWED_DOMAINS` — **legacy/không còn dùng**. Endpoint OpenAI-compatible hiện tự do (chỉ check URL hợp lệ). Người dùng tự chịu trách nhiệm chọn endpoint tin cậy.
+- `ANALYZE_NORMALIZER_ENABLED` — bật/tắt server-side LLM normalizer (mặc định `true`). Khi provider trả JSON sai schema, server gọi Gemini flash-lite map về schema chuẩn.
 - `PORT` — cổng server (mặc định 3000).
 - Rate limit: `RATE_LIMIT_WINDOW_MS`, `RATE_LIMIT_MAX`, `AI_RATE_LIMIT_MAX`.
 
