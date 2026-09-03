@@ -1,3 +1,5 @@
+import { SETTINGS_SAVED_EVENT } from './syncEvents';
+
 export type ApiProviderType = 'gemini' | 'openai' | 'anthropic';
 export type ApiProfileRole = 'render' | 'analyze' | 'both';
 
@@ -154,6 +156,13 @@ export const loadAppSettings = (): AppSettings => {
 };
 
 export const saveAppSettings = (settings: AppSettings): void => {
+  writeSettingsLocally(settings);
+  // Thông báo để syncService đẩy lên server (lắng nghe qua window event).
+  window.dispatchEvent(new CustomEvent(SETTINGS_SAVED_EVENT, { detail: settings }));
+};
+
+// Ghi thuần vào localStorage — không phát event (dùng khi sync kéo dữ liệu về).
+export const writeSettingsLocally = (settings: AppSettings): void => {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
   } catch (err) {

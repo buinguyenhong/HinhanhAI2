@@ -1,4 +1,5 @@
 import express, { Request, Response, NextFunction } from 'express';
+import fs from 'fs';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
@@ -126,7 +127,7 @@ app.get('/api/health', (req, res) => {
 
 // 2. Login validation schema
 const loginSchema = z.object({
-  password: z.string().min(1, 'Mật khẩu không được để trống').max(200, 'Mật kh�u quá dài'),
+  password: z.string().min(1, 'Mật khẩu không được để trống').max(200, 'Mật khẩu quá dài'),
 });
 
 // POST /api/login (Public with loginLimiter)
@@ -185,6 +186,106 @@ app.use('/api', (req, res, next) => {
   return requireAuth(req, res, next);
 });
 
+// --- CLOUD SYNC STORE (JSON file) ---
+// Giúp đồng bộ cài đặt (API profiles) + lịch sử tạo ảnh giữa các máy/trình duyệt.
+// Dữ liệu lưu dạng JSON file trên server (đường dẫn tuỳ biến qua SYNC_DATA_FILE).
+// LƯU Ý deploy: trên Render free tier, file hệ thống là ephemeral — nếu muốn giữ dữ liệu
+// qua mỗi lần redeploy/restart cần gắn Persistent Disk và trỏ SYNC_DATA_FILE vào đó.
+const SYNC_DATA_FILE =
+  process.env.SYNC_DATA_FILE || path.join(process.cwd(), 'data', 'sync-store.json');
+
+interface SyncDoc {
+  updatedAt: number;
+  data: unknown;
+}
+
+interface SyncStoreShape {
+  settings?: SyncDoc | null;
+  history?: SyncDoc | null;
+}
+
+let syncWriteQueue: Promise<void> = Promise.resolve();
+
+function ensureSyncDir(): void {
+  fs.mkdirSync(path.dirname(SYNC_DATA_FILE), { recursive: true });
+}
+
+function readSyncStore(): SyncStoreShape {
+  try {
+    ensureSyncDir();
+    if (!fs.existsSync(SYNC_DATA_FILE)) return {};
+    const raw = fs.readFileSync(SYNC_DATA_FILE, 'utf-8');
+    const parsed = JSON.parse(raw);
+    return {
+      settings: parsed?.settings ?? null,
+      history: parsed?.history ?? null,
+    };
+  } catch (err) {
+    console.error('Không đọc được sync store:', err);
+    return {};
+  }
+}
+
+function writeSyncStore(store: SyncStoreShape): void {
+  ensureSyncDir();
+  const tmp = `${SYNC_DATA_FILE}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(store, null, 2), 'utf-8');
+  fs.renameSync(tmp, SYNC_DATA_FILE);
+}
+
+// Serialise writes để tránh ghi đè khi 2 request đến gần như cùng lúc.
+function mutateSyncStore(mutator: (prev: SyncStoreShape) => SyncStoreShape): Promise<void> {
+  const run = async () => {
+    const prev = readSyncStore();
+    const next = mutator(prev);
+    writeSyncStore(next);
+  };
+  syncWriteQueue = syncWriteQueue.then(run, run);
+  return syncWriteQueue;
+}
+
+// GET /api/sync/state — lấy toàn bộ trạng thái đã đồng bộ (settings + history)
+app.get('/api/sync/state', (req: Request, res: Response) => {
+  try {
+    const store = readSyncStore();
+    return res.json({
+      success: true,
+      settings: store.settings ?? null,
+      history: store.history ?? null,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message || 'Không đọc được sync state.' });
+  }
+});
+
+// PUT /api/sync/settings — lưu AppSettings lên server (last-write-wins theo updatedAt)
+app.put('/api/sync/settings', (req: Request, res: Response) => {
+  const data = req.body?.settings;
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    return res.status(400).json({ error: 'Payload settings không hợp lệ.' });
+  }
+  const doc: SyncDoc = { updatedAt: Date.now(), data };
+  mutateSyncStore((prev) => ({ ...prev, settings: doc }))
+    .then(() => res.json({ success: true, updatedAt: doc.updatedAt }))
+    .catch((err: any) =>
+      res.status(500).json({ error: err?.message || 'Không lưu được settings.' })
+    );
+});
+
+// PUT /api/sync/history — lưu toàn bộ lịch sử lên server
+app.put('/api/sync/history', (req: Request, res: Response) => {
+  const data = req.body?.history;
+  if (!Array.isArray(data) || data.length > 100) {
+    return res.status(400).json({ error: 'Payload history phải là mảng (tối đa 100 mục).' });
+  }
+  const doc: SyncDoc = { updatedAt: Date.now(), data };
+  mutateSyncStore((prev) => ({ ...prev, history: doc }))
+    .then(() => res.json({ success: true, updatedAt: doc.updatedAt }))
+    .catch((err: any) =>
+      res.status(500).json({ error: err?.message || 'Không lưu được history.' })
+    );
+});
+
 // --- LAZY-INITIALIZED GEMINI CLIENT ---
 let geminiClient: GoogleGenAI | null = null;
 function getGeminiClient(): GoogleGenAI | null {
@@ -221,7 +322,7 @@ const ANALYSIS_RESPONSE_SCHEMA: any = {
         quality: { type: Type.STRING, description: 'Độ mềm/gắt (Khuếch tán dịu, Tương phản cao Chiaroscuro...)' },
         detailedAnalysis: { type: Type.STRING, description: 'Phân tích chi tiết ánh sáng và bóng đổ' },
         promptSnippetEn: { type: Type.STRING, description: 'Đoạn prompt tiếng Anh riêng cho ánh sáng' },
-        promptSnippetVi: { type: Type.STRING, description: '�oạn mô tả tiếng Việt riêng cho ánh sáng' },
+        promptSnippetVi: { type: Type.STRING, description: 'Đoạn mô tả tiếng Việt riêng cho ánh sáng' },
       },
       required: ['sourceType', 'direction', 'colorTemperature', 'quality', 'detailedAnalysis'],
     },
@@ -344,8 +445,8 @@ Analyze the provided image in comprehensive, professional detail for the followi
    - Objects and Props (Liệt kê tỉ mỉ mọi đồ vật, đạo cụ)
    - Materials & Textures (Xi măng thô, Đá cổ phong hóa, Gỗ sồi mộc, Kim loại đồng gỉ, Thủy tinh pha lê...)
    - Atmosphere & Environmental mood (Sương mù huyền bí, Bụi bay lơ lửng trong vạt nắng, Ánh nến lung linh...)
-   - Depth of field (�ộ sâu trường ảnh DOF, Bokeh)
-3. Lighting & Illumination (Ánh sáng: hướng sáng, nguồn sáng, nhiệt độ màu, độ gắt/dịu, bóng đ� Chiaroscuro...)
+   - Depth of field (Độ sâu trường ảnh DOF, Bokeh)
+3. Lighting & Illumination (Ánh sáng: hướng sáng, nguồn sáng, nhiệt độ màu, độ gắt/dịu, bóng đổ Chiaroscuro...)
 4. Camera & Optical Composition (Góc máy, bố cục, tiêu cự ống kính đề xuất, khẩu độ)
 5. Color Palette & Mood (Bảng màu chủ đạo, các mã HEX nổi bật, tông cảm xúc, Color grading)
 6. Subject & Textures (Chủ thể, thần thái, chất liệu bề mặt)
@@ -690,7 +791,7 @@ const generateImageSchema = z.object({
 
 // Helper: validate custom endpoint URL shape only.
 // Note: SSRF allowlist removed per user request — người dùng tự chịu trách nhiệm
-// chọn endpoint OpenAI-compatible tin cậy. Chỉ check URL h�p lệ.
+// chọn endpoint OpenAI-compatible tin cậy. Chỉ check URL hợp lệ.
 function validateCustomEndpoint(rawEndpoint: string): { ok: boolean; hostname?: string; error?: string } {
   try {
     const parsedUrl = new URL(rawEndpoint);

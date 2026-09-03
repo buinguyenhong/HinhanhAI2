@@ -8,14 +8,17 @@
 
 | # | Commit | Tóm tắt |
 |---|---|---|
-| 1 | `e700579` | **harden production config** — đọc PORT, trust proxy 1, crash nếu thiếu APP_PASSWORD/JWT_SECRET; xóa hint "admin"; dedupe vite trong deps. |
-| 2 | `089b5cf` | **share analyze schema and add error boundary** — ANALYSION_RESPONSE_SCHEMA dùng chung 2 model Gemini; ErrorBoundary. **⚠️ server.ts bị mojibake (PowerShell ANSI).** |
-| 3 | `089e50b` | **refactor: complete multi-provider (gemini/openai/anthropic), drop Pollinations fallback, fix encoding** — toàn bộ refactor multi-provider (xem mục 0A). |
-| 4 | `d8e8f05` | **remove SSRF allowlist** — bỏ hoàn toàn check domain, chỉ validate URL hợp lệ. |
-| 5 | `d03ee3b` | **fix: graceful schema mismatch** — `normalizeAnalysis()` client-side với nhiều alias (camel/snake/key lạ); ErrorBoundary hiển thị error.message. |
-| 6 | `06baaa9` | **feat: server-side LLM normalizer** — `looksLikeCompliantAnalysis()` pass-through khi OK, nếu không thì gọi Gemini flash-lite map về schema. |
-| 7 | `0eeab63` | **fix: extend aspectRatio enum + upstream timeouts** — AspectRatio thêm `21:9\|3:4\|2:3`; `fetchWithTimeout` cho analyze (60s) + generate (90s). |
+| 11 | `HEAD` | **feat: cloud sync store, fix encoding, and harden lifecycle & storage** — sync settings & history qua JSON file server (/api/sync/*); fix triệt để 5 chỗ mojibake UTF-8; memoize ThemeContext & guard hasSyncedRef; quota fallback cho history localStorage; dẹp warning Vite. |
+| 10 | `96258a1` | **docs: note Unsplash evaluation decision** — ghi nhận quyết định không tích hợp Unsplash. |
+| 9 | `3c900c8` | **docs: consolidate full change history** — củng cố tài liệu và tham chiếu kiến trúc. |
 | 8 | `e846c68` | **fix: 404 handling + real test-profile endpoint** — thử 3 image paths; extractUpstreamErrorMessage; `/api/test-profile` thật (analyze text + render image probe). |
+| 7 | `0eeab63` | **fix: extend aspectRatio enum + upstream timeouts** — AspectRatio thêm `21:9\|3:4\|2:3`; `fetchWithTimeout` cho analyze (60s) + generate (90s). |
+| 6 | `06baaa9` | **feat: server-side LLM normalizer** — `looksLikeCompliantAnalysis()` pass-through khi OK, nếu không thì gọi Gemini flash-lite map về schema. |
+| 5 | `d03ee3b` | **fix: graceful schema mismatch** — `normalizeAnalysis()` client-side với nhiều alias (camel/snake/key lạ); ErrorBoundary hiển thị error.message. |
+| 4 | `d8e8f05` | **remove SSRF allowlist** — bỏ hoàn toàn check domain, chỉ validate URL hợp lệ. |
+| 3 | `089e50b` | **refactor: complete multi-provider (gemini/openai/anthropic), drop Pollinations fallback, fix encoding** — toàn bộ refactor multi-provider (xem mục 0A). |
+| 2 | `089b5cf` | **share analyze schema and add error boundary** — ANALYSION_RESPONSE_SCHEMA dùng chung 2 model Gemini; ErrorBoundary. **⚠️ server.ts bị mojibake (PowerShell ANSI).** |
+| 1 | `e700579` | **harden production config** — đọc PORT, trust proxy 1, crash nếu thiếu APP_PASSWORD/JWT_SECRET; xóa hint "admin"; dedupe vite trong deps. |
 
 ---
 

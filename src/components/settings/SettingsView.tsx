@@ -35,6 +35,7 @@ import {
   getAnalyzeProfile,
   getRenderProfile,
 } from '../../services/storageService';
+import { getAuthHeaders } from '../../services/authService';
 import {
   authenticateWithGoogleDrive,
   disconnectGoogleDrive,
@@ -283,7 +284,6 @@ export const SettingsView: React.FC = () => {
     }
 
     try {
-      const { getAuthHeaders } = await import('../../services/authService');
       const response = await fetch('/api/test-profile', {
         method: 'POST',
         headers: {
@@ -323,7 +323,7 @@ export const SettingsView: React.FC = () => {
         ...prev,
         [profile.id]: {
           status: 'error',
-          message: `L�i mạng khi test: ${err?.message || err}`,
+          message: `Lỗi mạng khi test: ${err?.message || err}`,
         },
       }));
     } finally {
