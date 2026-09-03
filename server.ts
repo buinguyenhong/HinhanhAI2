@@ -55,14 +55,14 @@ const apiLimiter = rateLimit({
   },
 });
 
-// 2. Strict rate limiter for AI-intensive generation & style analysis endpoints
+// 2. Rate limiter for AI-intensive generation & style analysis endpoints
 const aiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: Number(process.env.AI_RATE_LIMIT_MAX) || 20, // limit each IP to 20 AI requests / 15 mins
+  max: Number(process.env.AI_RATE_LIMIT_MAX) || 120, // limit each IP to 120 AI requests / 15 mins (studio friendly)
   standardHeaders: true,
   legacyHeaders: false,
   message: {
-    error: 'Bạn đã đạt giới hạn yêu cầu AI (tối đa 20 yêu cầu / 15 phút). Vui lòng thử lại sau.',
+    error: 'Bạn đã đạt giới hạn yêu cầu AI (tối đa 120 yêu cầu / 15 phút). Vui lòng thử lại sau ít phút.',
   },
 });
 
@@ -497,94 +497,104 @@ async function analyzeWithGemini(opts: {
   let response: any = null;
   let usedModel = opts.model;
 
-  try {
-    response = await ai.models.generateContent({
-      model: opts.model,
-      contents: {
-        parts: [
-          {
-            inlineData: {
-              mimeType: opts.mimeType || 'image/jpeg',
-              data: cleanBase64,
+    let lastError = '';
+    try {
+      response = await ai.models.generateContent({
+        model: opts.model,
+        contents: {
+          parts: [
+            {
+              inlineData: {
+                mimeType: opts.mimeType || 'image/jpeg',
+                data: cleanBase64,
+              },
             },
-          },
-          { text: finalPrompt },
-        ],
-      },
-      config: {
-        systemInstruction:
-          'You are a world-class cinematographer and AI art director. Provide exceptionally deep visual analysis in Vietnamese with modular prompt snippets.',
-        responseMimeType: 'application/json',
-        responseSchema: ANALYSIS_RESPONSE_SCHEMA,
-      },
-    });
-  } catch (primaryErr: any) {
-    console.warn(`Gemini model ${opts.model} failed:`, primaryErr?.message);
-    response = null;
-  }
-
-  if (response && response.text) {
-    const resultJson = JSON.parse(response.text || '{}');
-    const compliant = await ensureCompliantAnalysis(resultJson, opts.apiKey);
-    return { analysis: compliant, source: usedModel };
-  }
-  throw new Error(`Gemini model ${opts.model} did not return a valid response.`);
-}
-
-async function analyzeWithOpenAI(opts: {
-  apiKey: string;
-  model: string;
-  apiEndpoint?: string | null;
-  imageBase64: string;
-  mimeType: string;
-  userFocus?: string | null;
-}): Promise<{ analysis: any; source: string }> {
-  const endpoint =
-    (opts.apiEndpoint?.replace(/\/$/, '') || 'https://api.openai.com/v1') + '/chat/completions';
-  const cleanBase64 = opts.imageBase64.replace(/^data:image\/[a-zA-Z0-9+]+;base64,/, '');
-  const dataUrl = `data:${opts.mimeType || 'image/jpeg'};base64,${cleanBase64}`;
-  const finalPrompt = opts.userFocus
-    ? `${ANALYSIS_PROMPT_TEXT}\n\nUser specific focus request: "${opts.userFocus}"`
-    : ANALYSIS_PROMPT_TEXT;
-
-  const response = await fetchWithTimeout(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${opts.apiKey}`,
-    },
-    body: JSON.stringify({
-      model: opts.model,
-      messages: [
-        {
-          role: 'system',
-          content:
-            'You are a world-class cinematographer and AI art director. Respond ONLY with a single valid JSON object matching the schema. No prose, no markdown.',
-        },
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: finalPrompt },
-            { type: 'image_url', image_url: { url: dataUrl } },
+            { text: finalPrompt },
           ],
         },
-      ],
-      response_format: { type: 'json_object' },
-      max_tokens: 4096,
-    }),
-  }, ANALYZE_TIMEOUT_MS);
+        config: {
+          systemInstruction:
+            'You are a world-class cinematographer and AI art director. Provide exceptionally deep visual analysis in Vietnamese with modular prompt snippets.',
+          responseMimeType: 'application/json',
+          responseSchema: ANALYSIS_RESPONSE_SCHEMA,
+        },
+      });
+    } catch (primaryErr: any) {
+      lastError = primaryErr?.message || String(primaryErr);
+      console.warn(`Gemini model ${opts.model} failed:`, lastError);
+      response = null;
+    }
 
-  if (!response.ok) {
-    const errText = await response.text().catch(() => '');
-    throw new Error(`OpenAI analyze failed (${response.status}): ${errText.slice(0, 300)}`);
+    if (response && response.text) {
+      const resultJson = JSON.parse(response.text || '{}');
+      const compliant = await ensureCompliantAnalysis(resultJson, opts.apiKey);
+      return { analysis: compliant, source: usedModel };
+    }
+    throw new Error(lastError || `Gemini model ${opts.model} không trả về phản hồi hợp lệ.`);
   }
-  const data: any = await response.json();
-  const content = data?.choices?.[0]?.message?.content;
-  if (!content) throw new Error('OpenAI returned empty content.');
-  let analysis = typeof content === 'string' ? JSON.parse(content) : content;
-  analysis = await ensureCompliantAnalysis(analysis);
-  return { analysis, source: opts.model };
-}
+
+  async function analyzeWithOpenAI(opts: {
+    apiKey: string;
+    model: string;
+    apiEndpoint?: string | null;
+    imageBase64: string;
+    mimeType: string;
+    userFocus?: string | null;
+  }): Promise<{ analysis: any; source: string }> {
+    const endpoint =
+      (opts.apiEndpoint?.replace(/\/$/, '') || 'https://api.openai.com/v1') + '/chat/completions';
+    const cleanBase64 = opts.imageBase64.replace(/^data:image\/[a-zA-Z0-9+]+;base64,/, '');
+    const dataUrl = `data:${opts.mimeType || 'image/jpeg'};base64,${cleanBase64}`;
+    const finalPrompt = opts.userFocus
+      ? `${ANALYSIS_PROMPT_TEXT}\n\nUser specific focus request: "${opts.userFocus}"`
+      : ANALYSIS_PROMPT_TEXT;
+
+    const response = await fetchWithTimeout(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${opts.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: opts.model,
+        messages: [
+          {
+            role: 'system',
+            content:
+              'You are a world-class cinematographer and AI art director. Respond ONLY with a single valid JSON object matching the schema. No prose, no markdown.',
+          },
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: finalPrompt },
+              { type: 'image_url', image_url: { url: dataUrl } },
+            ],
+          },
+        ],
+        response_format: { type: 'json_object' },
+        max_tokens: 4096,
+      }),
+    }, ANALYZE_TIMEOUT_MS);
+
+    if (!response.ok) {
+      const errText = await response.text().catch(() => '');
+      throw new Error(`OpenAI analyze failed (${response.status}): ${errText.slice(0, 300)}`);
+    }
+    const data: any = await response.json();
+    const content = data?.choices?.[0]?.message?.content;
+    if (!content) throw new Error('OpenAI returned empty content.');
+
+    let analysis: any;
+    if (typeof content === 'string') {
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) throw new Error('OpenAI response did not contain a valid JSON object.');
+      analysis = JSON.parse(jsonMatch[0]);
+    } else {
+      analysis = content;
+    }
+    analysis = await ensureCompliantAnalysis(analysis);
+    return { analysis, source: opts.model };
+  }
 
 async function analyzeWithAnthropic(opts: {
   apiKey: string;
@@ -945,6 +955,40 @@ async function generateWithGemini(p: GenerateParams): Promise<GeneratedVariant[]
   const out: GeneratedVariant[] = [];
   const baseSeed = p.seed && p.seed !== '-1' ? parseInt(p.seed, 10) : Math.floor(Math.random() * 900000) + 100000;
 
+  const isImagenModel = p.model.toLowerCase().includes('imagen');
+
+  // Ưu tiên 1: Với model Imagen (ví dụ imagen-3.0-generate-002), dùng phương thức generateImages chuẩn của Google GenAI SDK
+  if (isImagenModel) {
+    const validRatios = ['1:1', '3:4', '4:3', '9:16', '16:9'];
+    const ratio = validRatios.includes(p.aspectRatio) ? p.aspectRatio : '1:1';
+    try {
+      const response = await ai.models.generateImages({
+        model: p.model,
+        prompt: p.prompt,
+        config: {
+          numberOfImages: Math.min(Math.max(p.variations || 1, 1), 4),
+          aspectRatio: ratio as any,
+          outputMimeType: 'image/jpeg',
+        },
+      });
+      if (response?.generatedImages && Array.isArray(response.generatedImages)) {
+        response.generatedImages.forEach((img: any, idx: number) => {
+          if (img?.image?.imageBytes) {
+            out.push({
+              url: `data:image/jpeg;base64,${img.image.imageBytes}`,
+              seed: (baseSeed + idx * 1337).toString(),
+              modelUsed: `Google Imagen (${p.model})`,
+            });
+          }
+        });
+      }
+      if (out.length > 0) return out;
+    } catch (imagenErr: any) {
+      console.warn(`generateImages call failed for ${p.model}, trying generateContent fallback:`, imagenErr?.message);
+    }
+  }
+
+  // Ưu tiên 2: Gọi generateContent (cho Gemini multimodal generation hoặc fallback)
   for (let i = 0; i < p.variations; i++) {
     const itemSeed = (baseSeed + i * 1337).toString();
     const parts: any[] = [];
@@ -1013,8 +1057,11 @@ function extractUpstreamErrorMessage(status: number, rawText: string): string {
 
 async function generateWithOpenAI(p: GenerateParams): Promise<GeneratedVariant[]> {
   const base = p.apiEndpoint?.replace(/\/$/, '') || 'https://api.openai.com/v1';
-  // Try common OpenAI image routes. Some proxies use '/images' instead of '/images/generations'.
-  const candidatePaths = ['/images/generations', '/images', '/v1/images/generations'];
+  // Tránh double /v1 nếu URL đã kết thúc bằng /v1
+  const hasV1 = /\/v1$/i.test(base);
+  const candidatePaths = hasV1
+    ? ['/images/generations', '/images']
+    : ['/images/generations', '/images', '/v1/images/generations'];
   const sizeMap: Record<string, string> = {
     '1:1': '1024x1024',
     '16:9': '1792x1024',
@@ -1224,33 +1271,140 @@ app.post('/api/generate-image', aiLimiter, async (req, res) => {
 });
 
 // Endpoint: Test profile connectivity (quick sanity check before user attempts real generation)
-app.post('/api/test-profile', aiLimiter, async (req, res) => {
+app.post('/api/test-profile', apiLimiter, async (req, res) => {
   try {
     const schema = z.object({
       provider: z.enum(['gemini', 'openai', 'anthropic']),
       apiKey: z.string().max(500).optional().nullable(),
       apiEndpoint: z.string().max(500).optional().nullable(),
       model: z.string().max(150).optional().nullable(),
+      renderModel: z.string().max(150).optional().nullable(),
+      analyzeModel: z.string().max(150).optional().nullable(),
       role: z.enum(['render', 'analyze', 'both']).optional().default('both'),
+      testType: z.enum(['connection', 'render', 'both']).optional().default('connection'),
     });
     const parsed = schema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({ error: 'Invalid payload', success: false });
+      return res.status(400).json({ error: 'Dữ liệu không hợp lệ', success: false });
     }
-    const { provider, apiKey, apiEndpoint, model, role } = parsed.data;
+    const { provider, apiKey, apiEndpoint, model, renderModel, analyzeModel, role, testType } = parsed.data;
     const start = Date.now();
 
+    // ----------------------------------------------------
+    // CHẾ ĐỘ 1: TEST MODEL SINH ẢNH THỰC TẾ (Render Test)
+    // ----------------------------------------------------
+    if (testType === 'render') {
+      if (provider === 'anthropic') {
+        return res.status(400).json({
+          success: false,
+          testType: 'render',
+          error: 'Anthropic không hỗ trợ sinh ảnh. Vui lòng dùng Google Gemini hoặc OpenAI để sinh ảnh.',
+        });
+      }
+
+      const targetRenderModel = renderModel || model;
+      if (!targetRenderModel) {
+        return res.status(400).json({
+          success: false,
+          testType: 'render',
+          error: 'Thiếu tên model sinh ảnh (Render Model).',
+        });
+      }
+
+      const testPrompt = 'A minimalist red origami bird on white clean studio backdrop, high quality';
+
+      if (provider === 'gemini') {
+        const key = apiKey || process.env.GEMINI_API_KEY;
+        if (!key) {
+          return res.status(400).json({
+            success: false,
+            testType: 'render',
+            error: 'Thiếu GEMINI_API_KEY trên server hoặc chưa nhập API Key.',
+          });
+        }
+        try {
+          const variants = await generateWithGemini({
+            prompt: testPrompt,
+            aspectRatio: '1:1',
+            variations: 1,
+            quality: 'standard',
+            seed: '-1',
+            model: targetRenderModel,
+            apiKey: key,
+          });
+          const latency = Date.now() - start;
+          return res.json({
+            success: true,
+            testType: 'render',
+            latency,
+            imageUrl: variants[0]?.url,
+            modelUsed: variants[0]?.modelUsed || `Google Gemini ${targetRenderModel}`,
+            message: `Model sinh ảnh '${targetRenderModel}' hoạt động tốt (${latency}ms)!`,
+          });
+        } catch (err: any) {
+          return res.status(500).json({
+            success: false,
+            testType: 'render',
+            latency: Date.now() - start,
+            error: err?.message || 'Lỗi khi gọi model sinh ảnh Gemini.',
+          });
+        }
+      }
+
+      if (provider === 'openai') {
+        if (!apiKey) {
+          return res.status(400).json({
+            success: false,
+            testType: 'render',
+            error: 'Vui lòng nhập API Key để test model sinh ảnh OpenAI.',
+          });
+        }
+        try {
+          const variants = await generateWithOpenAI({
+            prompt: testPrompt,
+            aspectRatio: '1:1',
+            variations: 1,
+            quality: 'standard',
+            seed: '-1',
+            model: targetRenderModel,
+            apiKey,
+            apiEndpoint: apiEndpoint || undefined,
+          });
+          const latency = Date.now() - start;
+          return res.json({
+            success: true,
+            testType: 'render',
+            latency,
+            imageUrl: variants[0]?.url,
+            modelUsed: variants[0]?.modelUsed || `OpenAI ${targetRenderModel}`,
+            message: `Model sinh ảnh '${targetRenderModel}' hoạt động tốt (${latency}ms)!`,
+          });
+        } catch (err: any) {
+          return res.status(500).json({
+            success: false,
+            testType: 'render',
+            latency: Date.now() - start,
+            error: err?.message || 'Lỗi khi gọi model sinh ảnh OpenAI.',
+          });
+        }
+      }
+    }
+
+    // ----------------------------------------------------
+    // CHẾ ĐỘ 2: TEST KẾT NỐI (Connection / Text & Auth Probe)
+    // ----------------------------------------------------
     const checks: { name: string; ok: boolean; latency?: number; detail?: string }[] = [];
+    const targetAnalyzeModel = analyzeModel || model;
 
     // 1) Analyze probe — tiny text-only request (cheap, validates chat/vision route)
-    if (role === 'analyze' || role === 'both') {
+    if (role === 'analyze' || role === 'both' || testType === 'connection') {
       try {
         if (provider === 'gemini') {
           const key = apiKey || process.env.GEMINI_API_KEY;
           if (!key) throw new Error('Thiếu GEMINI_API_KEY');
           const ai = new GoogleGenAI({ apiKey: key });
           await ai.models.generateContent({
-            model: model || 'gemini-3.1-flash-lite',
+            model: targetAnalyzeModel || 'gemini-3.1-flash-lite',
             contents: { parts: [{ text: 'Reply with the single word: ok' }] },
           });
           checks.push({ name: 'analyze (gemini text)', ok: true, latency: Date.now() - start });
@@ -1260,18 +1414,18 @@ app.post('/api/test-profile', aiLimiter, async (req, res) => {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
             body: JSON.stringify({
-              model: model || 'gpt-4o-mini',
+              model: targetAnalyzeModel || 'gpt-4o-mini',
               messages: [{ role: 'user', content: 'Reply with the single word: ok' }],
               max_tokens: 8,
             }),
           }, ANALYZE_TIMEOUT_MS);
+          const t = r.ok ? '' : await r.text().catch(() => '');
           checks.push({
             name: 'analyze (openai chat)',
             ok: r.ok,
             latency: Date.now() - start,
-            detail: r.ok ? undefined : `${r.status} ${(await r.text().catch(() => '')).slice(0, 200)}`,
+            detail: r.ok ? undefined : `${r.status} ${extractUpstreamErrorMessage(r.status, t)}`,
           });
-          if (!r.ok) await r.text().catch(() => {});
         } else if (provider === 'anthropic') {
           const endpoint = (apiEndpoint?.replace(/\/$/, '') || 'https://api.anthropic.com') + '/v1/messages';
           const r = await fetchWithTimeout(endpoint, {
@@ -1283,90 +1437,94 @@ app.post('/api/test-profile', aiLimiter, async (req, res) => {
               'anthropic-dangerous-direct-browser-access': 'true',
             },
             body: JSON.stringify({
-              model: model || 'claude-3-5-sonnet-latest',
+              model: targetAnalyzeModel || 'claude-3-5-sonnet-latest',
               max_tokens: 8,
               messages: [{ role: 'user', content: 'Reply with the single word: ok' }],
             }),
           }, ANALYZE_TIMEOUT_MS);
+          const t = r.ok ? '' : await r.text().catch(() => '');
           checks.push({
             name: 'analyze (anthropic messages)',
             ok: r.ok,
             latency: Date.now() - start,
-            detail: r.ok ? undefined : `${r.status} ${(await r.text().catch(() => '')).slice(0, 200)}`,
+            detail: r.ok ? undefined : `${r.status} ${extractUpstreamErrorMessage(r.status, t)}`,
           });
-          if (!r.ok) await r.text().catch(() => {});
         }
       } catch (e: any) {
         checks.push({ name: 'analyze', ok: false, detail: e?.message || String(e) });
       }
     }
 
-    // 2) Render probe — try common image paths, 1x1 not needed; just see if route exists
-    if ((role === 'render' || role === 'both') && provider === 'openai') {
-      const base = apiEndpoint?.replace(/\/$/, '') || 'https://api.openai.com/v1';
-      const paths = ['/images/generations', '/images', '/v1/images/generations'];
-      let renderOk = false;
-      let renderDetail = '';
-      for (const p of paths) {
-        const url = base + p;
-        try {
-          const r = await fetchWithTimeout(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-            body: JSON.stringify({
-              model: model || 'gpt-image-1',
-              prompt: 'a tiny red dot',
-              n: 1,
-              size: '1024x1024',
-            }),
-          }, GENERATE_TIMEOUT_MS);
-          if (r.ok) {
-            renderOk = true;
-            checks.push({ name: `render (openai ${p})`, ok: true, latency: Date.now() - start });
-            break;
-          } else {
-            const t = await r.text().catch(() => '');
-            const msg = extractUpstreamErrorMessage(r.status, t);
-            renderDetail = `${r.status} @ ${p}: ${msg}`;
-            if (r.status !== 404 && r.status !== 405) {
-              // non-404 → endpoint exists, but request failed (e.g. invalid key). Surface.
-              checks.push({ name: `render (openai ${p})`, ok: false, detail: renderDetail });
-              renderOk = true; // treat as "reachable" so user knows it's not a 404 issue
+    // 2) Render probe (chỉ khi testType === 'both')
+    if (testType === 'both') {
+      if ((role === 'render' || role === 'both') && provider === 'openai') {
+        const base = apiEndpoint?.replace(/\/$/, '') || 'https://api.openai.com/v1';
+        const paths = ['/images/generations', '/images', '/v1/images/generations'];
+        let renderOk = false;
+        let renderDetail = '';
+        for (const p of paths) {
+          const url = base + p;
+          try {
+            const r = await fetchWithTimeout(url, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+              body: JSON.stringify({
+                model: renderModel || model || 'gpt-image-1',
+                prompt: 'a tiny red dot',
+                n: 1,
+                size: '1024x1024',
+              }),
+            }, GENERATE_TIMEOUT_MS);
+            if (r.ok) {
+              renderOk = true;
+              checks.push({ name: `render (openai ${p})`, ok: true, latency: Date.now() - start });
               break;
+            } else {
+              const t = await r.text().catch(() => '');
+              const msg = extractUpstreamErrorMessage(r.status, t);
+              renderDetail = `${r.status} @ ${p}: ${msg}`;
+              if (r.status !== 404 && r.status !== 405) {
+                checks.push({ name: `render (openai ${p})`, ok: false, detail: renderDetail });
+                renderOk = true;
+                break;
+              }
             }
+          } catch (e: any) {
+            renderDetail = e?.message || String(e);
           }
-        } catch (e: any) {
-          renderDetail = e?.message || String(e);
         }
-      }
-      if (!renderOk) {
+        if (!renderOk) {
+          checks.push({
+            name: 'render (openai)',
+            ok: false,
+            detail: `Endpoint '${base}' không hỗ trợ sinh ảnh. ${renderDetail}`,
+          });
+        }
+      } else if ((role === 'render' || role === 'both') && provider === 'anthropic') {
         checks.push({
-          name: 'render (openai)',
+          name: 'render (anthropic)',
           ok: false,
-          detail: `Endpoint '${base}' không hỗ trợ sinh ảnh (thử ${paths.join(', ')} đều 404 / lỗi). ${renderDetail}`,
+          detail: 'Anthropic không hỗ trợ sinh ảnh.',
+        });
+      } else if ((role === 'render' || role === 'both') && provider === 'gemini') {
+        checks.push({
+          name: 'render (gemini)',
+          ok: true,
+          detail: 'Gemini render dùng SDK server-side; sẵn sàng sinh ảnh.',
         });
       }
-    } else if ((role === 'render' || role === 'both') && provider === 'anthropic') {
-      checks.push({
-        name: 'render (anthropic)',
-        ok: false,
-        detail: 'Anthropic không hỗ trợ sinh ảnh. Vui lòng chọn Gemini hoặc OpenAI để sinh ảnh.',
-      });
-    } else if ((role === 'render' || role === 'both') && provider === 'gemini') {
-      checks.push({
-        name: 'render (gemini)',
-        ok: true,
-        detail: 'Gemini render dùng SDK server-side; không cần kiểm tra endpoint.',
-      });
     }
 
     const allOk = checks.every((c) => c.ok);
+    const totalLatency = Date.now() - start;
     return res.json({
       success: allOk,
+      testType: testType || 'connection',
       provider,
       role,
       checks,
-      message: allOk ? 'Tất cả kiểm tra pass.' : 'Một số kiểm tra thất bại — xem chi tiết.',
+      latency: totalLatency,
+      message: allOk ? `Kết nối thành công (${totalLatency}ms)` : 'Một số kiểm tra thất bại — xem chi tiết.',
     });
   } catch (e: any) {
     return res.status(500).json({ error: e?.message || 'Test failed', success: false });

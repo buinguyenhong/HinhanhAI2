@@ -23,6 +23,7 @@ import {
   Server,
   Zap,
   Info,
+  Image as ImageIcon,
 } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import {
@@ -49,44 +50,64 @@ const PROVIDER_PRESETS: Record<
     endpoint: 'https://generativelanguage.googleapis.com',
     renderModel: 'imagen-3.0-generate-002',
     analyzeModel: 'gemini-3.7-flash',
-    notes: 'Google Gemini (mặc định) — dùng SDK với key. Hỗ trợ cả sinh ảnh và phân tích.',
+    notes: 'Google Gemini & Imagen (hỗ trợ cả sinh ảnh và phân tích)',
   },
   openai: {
     endpoint: 'https://api.openai.com/v1',
-    renderModel: 'gpt-image-1',
-    analyzeModel: 'gpt-4o',
-    notes: 'OpenAI / OpenAI-compatible proxy. Hỗ trợ cả sinh ảnh và phân tích.',
+    renderModel: 'dall-e-3',
+    analyzeModel: 'gpt-4o-mini',
+    notes: 'OpenAI hoặc proxy tương thích OpenAI',
   },
   anthropic: {
     endpoint: 'https://api.anthropic.com',
-    renderModel: '',
+    renderModel: '', // Anthropic không hỗ trợ sinh ảnh
     analyzeModel: 'claude-3-5-sonnet-latest',
-    notes: 'Anthropic — CHỈ phân tích ảnh. Không hỗ trợ sinh ảnh (UI sẽ chặn role render).',
+    notes: 'Anthropic Claude (chỉ dùng để phân tích ảnh mẫu)',
   },
 };
 
 const ROLE_OPTIONS: { value: ApiProfileRole; label: string; desc: string }[] = [
-  { value: 'both', label: 'Cả hai (Phân tích + Sinh ảnh)', desc: 'Dùng cho cả render và analyze.' },
-  { value: 'render', label: 'Chỉ sinh ảnh (Render)', desc: 'Chỉ dùng làm engine sinh ảnh.' },
-  { value: 'analyze', label: 'Chỉ phân tích ảnh mẫu', desc: 'Chỉ dùng để phân tích ảnh mẫu.' },
+  { value: 'both', label: 'Cả hai (Sinh ảnh & Phân tích)', desc: 'Dùng cho cả 2 vai trò' },
+  { value: 'render', label: 'Chỉ Sinh ảnh (Render)', desc: 'Chỉ dùng để tạo hình' },
+  { value: 'analyze', label: 'Chỉ Phân tích (Analyze)', desc: 'Chỉ dùng để đọc hiểu ảnh mẫu' },
 ];
 
 export const SettingsView: React.FC = () => {
   const { theme, setTheme } = useTheme();
   const [settings, setSettings] = useState<AppSettings>(loadAppSettings);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [visibleKeyId, setVisibleKeyId] = useState<string | null>(null);
   const [savedSuccess, setSavedSuccess] = useState(false);
 
   const [showDriveConnectModal, setShowDriveConnectModal] = useState(false);
   const [driveEmailInput, setDriveEmailInput] = useState('');
 
   const [testingProfileId, setTestingProfileId] = useState<string | null>(null);
+  const [testingRenderProfileId, setTestingRenderProfileId] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<
-    Record<string, { status: 'success' | 'error'; message: string; latency?: number }>
+    Record<string, { status: 'success' | 'error'; message: string; latency?: number; imageUrl?: string }>
   >({});
 
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
   const [showModalApiKey, setShowModalApiKey] = useState(false);
+
+  // Modal Test States (kiểm thử trong form thêm/sửa profile)
+  const [isModalTestingConn, setIsModalTestingConn] = useState(false);
+  const [isModalTestingRender, setIsModalTestingRender] = useState(false);
+  const [modalConnResult, setModalConnResult] = useState<{
+    status: 'success' | 'error';
+    message: string;
+    latency?: number;
+  } | null>(null);
+  const [modalRenderResult, setModalRenderResult] = useState<{
+    status: 'success' | 'error';
+    message: string;
+    latency?: number;
+    imageUrl?: string;
+    modelUsed?: string;
+  } | null>(null);
+  const [previewTestImage, setPreviewTestImage] = useState<string | null>(null);
 
   // Profile Form Fields (new schema)
   const [formName, setFormName] = useState('');
@@ -136,6 +157,9 @@ export const SettingsView: React.FC = () => {
     setFormAnalyzeModel(PROVIDER_PRESETS.openai.analyzeModel);
     setFormNotes(PROVIDER_PRESETS.openai.notes);
     setShowModalApiKey(false);
+    setModalConnResult(null);
+    setModalRenderResult(null);
+    setPreviewTestImage(null);
   };
 
   const handleOpenAddModal = () => {
@@ -154,6 +178,9 @@ export const SettingsView: React.FC = () => {
     setFormAnalyzeModel(profile.analyzeModel);
     setFormNotes(profile.notes || '');
     setShowModalApiKey(false);
+    setModalConnResult(null);
+    setModalRenderResult(null);
+    setPreviewTestImage(null);
     setIsProfileModalOpen(true);
   };
 
@@ -294,8 +321,10 @@ export const SettingsView: React.FC = () => {
           provider: profile.provider,
           apiKey: profile.apiKey || undefined,
           apiEndpoint: profile.apiEndpoint || undefined,
-          model: profile.role === 'analyze' ? profile.analyzeModel : profile.renderModel,
+          analyzeModel: profile.analyzeModel || undefined,
+          renderModel: profile.renderModel || undefined,
           role: profile.role,
+          testType: 'connection',
         }),
       });
       const data = await response.json();
@@ -305,7 +334,8 @@ export const SettingsView: React.FC = () => {
           ...prev,
           [profile.id]: {
             status: 'success',
-            message: `Pass • ${(data.checks || []).map((c: any) => `${c.name}${c.latency ? ` (${c.latency}ms)` : ''}`).join(' | ')}`,
+            message: `Kết nối OK • ${(data.checks || []).map((c: any) => `${c.name}${c.latency ? ` (${c.latency}ms)` : ''}`).join(' | ')}`,
+            latency: data.latency,
           },
         }));
       } else {
@@ -314,7 +344,7 @@ export const SettingsView: React.FC = () => {
           ...prev,
           [profile.id]: {
             status: 'error',
-            message: firstFail?.detail || data.error || 'Test thất bại — xem chi tiết.',
+            message: firstFail?.detail || data.error || 'Test kết nối thất bại.',
           },
         }));
       }
@@ -328,6 +358,201 @@ export const SettingsView: React.FC = () => {
       }));
     } finally {
       setTestingProfileId(null);
+    }
+  };
+
+  const handleTestProfileRender = async (profile: ApiProfile) => {
+    if (profile.provider === 'anthropic' || profile.role === 'analyze') return;
+    setTestingRenderProfileId(profile.id);
+    setTestResults((prev) => {
+      const next = { ...prev };
+      delete next[profile.id];
+      return next;
+    });
+
+    const hasKey = Boolean(profile.apiKey.trim()) || profile.provider === 'gemini';
+    if (!hasKey) {
+      setTestingRenderProfileId(null);
+      setTestResults((prev) => ({
+        ...prev,
+        [profile.id]: {
+          status: 'error',
+          message: 'Thiếu API Key cho nhà cung cấp này. Vui lòng bấm Sửa để bổ sung.',
+        },
+      }));
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/test-profile', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify({
+          provider: profile.provider,
+          apiKey: profile.apiKey || undefined,
+          apiEndpoint: profile.apiEndpoint || undefined,
+          renderModel: profile.renderModel || undefined,
+          role: profile.role,
+          testType: 'render',
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (response.ok && data.success) {
+        setTestResults((prev) => ({
+          ...prev,
+          [profile.id]: {
+            status: 'success',
+            message: `Model sinh ảnh OK (${data.latency || 0}ms) • ${data.modelUsed || profile.renderModel}`,
+            latency: data.latency,
+            imageUrl: data.imageUrl,
+          },
+        }));
+      } else {
+        setTestResults((prev) => ({
+          ...prev,
+          [profile.id]: {
+            status: 'error',
+            message: data.error || data.message || 'Lỗi khi test sinh ảnh.',
+          },
+        }));
+      }
+    } catch (err: any) {
+      setTestResults((prev) => ({
+        ...prev,
+        [profile.id]: {
+          status: 'error',
+          message: `Lỗi mạng khi test sinh ảnh: ${err?.message || err}`,
+        },
+      }));
+    } finally {
+      setTestingRenderProfileId(null);
+    }
+  };
+
+  // --- MODAL FORM TESTING HANDLERS ---
+  const handleModalTestConnection = async () => {
+    if (formProvider !== 'gemini' && !formApiKey.trim()) {
+      setModalConnResult({
+        status: 'error',
+        message: 'Thiếu API Key. Vui lòng nhập khóa API trước khi kiểm tra kết nối.',
+      });
+      return;
+    }
+
+    setIsModalTestingConn(true);
+    setModalConnResult(null);
+
+    try {
+      const response = await fetch('/api/test-profile', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify({
+          provider: formProvider,
+          apiKey: formApiKey.trim() || undefined,
+          apiEndpoint: formEndpoint.trim() || undefined,
+          analyzeModel: formAnalyzeModel.trim() || undefined,
+          role: formRole,
+          testType: 'connection',
+        }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (response.ok && data.success) {
+        setModalConnResult({
+          status: 'success',
+          message: data.message || `Kết nối API thành công (${data.latency || 0}ms).`,
+          latency: data.latency,
+        });
+      } else {
+        const firstFail = data.checks?.find((c: any) => !c.ok);
+        setModalConnResult({
+          status: 'error',
+          message: firstFail?.detail || data.error || data.message || 'Kết nối API thất bại.',
+        });
+      }
+    } catch (err: any) {
+      setModalConnResult({
+        status: 'error',
+        message: `Lỗi mạng khi kiểm tra kết nối: ${err?.message || err}`,
+      });
+    } finally {
+      setIsModalTestingConn(false);
+    }
+  };
+
+  const handleModalTestRender = async () => {
+    if (formProvider === 'anthropic') {
+      setModalRenderResult({
+        status: 'error',
+        message: 'Anthropic không hỗ trợ sinh ảnh. Vui lòng chọn Google Gemini hoặc OpenAI để sinh ảnh.',
+      });
+      return;
+    }
+
+    if (formProvider !== 'gemini' && !formApiKey.trim()) {
+      setModalRenderResult({
+        status: 'error',
+        message: 'Thiếu API Key. Vui lòng nhập khóa API trước khi test model sinh ảnh.',
+      });
+      return;
+    }
+
+    if (!formRenderModel.trim()) {
+      setModalRenderResult({
+        status: 'error',
+        message: 'Vui lòng nhập Model Sinh ảnh (Render Model).',
+      });
+      return;
+    }
+
+    setIsModalTestingRender(true);
+    setModalRenderResult(null);
+
+    try {
+      const response = await fetch('/api/test-profile', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify({
+          provider: formProvider,
+          apiKey: formApiKey.trim() || undefined,
+          apiEndpoint: formEndpoint.trim() || undefined,
+          renderModel: formRenderModel.trim() || undefined,
+          role: formRole,
+          testType: 'render',
+        }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (response.ok && data.success) {
+        setModalRenderResult({
+          status: 'success',
+          message: data.message || `Sinh ảnh thử nghiệm thành công (${data.latency || 0}ms)!`,
+          latency: data.latency,
+          imageUrl: data.imageUrl,
+          modelUsed: data.modelUsed,
+        });
+      } else {
+        setModalRenderResult({
+          status: 'error',
+          message: data.error || data.message || 'Không thể sinh ảnh bằng model này.',
+        });
+      }
+    } catch (err: any) {
+      setModalRenderResult({
+        status: 'error',
+        message: `Lỗi mạng khi test sinh ảnh: ${err?.message || err}`,
+      });
+    } finally {
+      setIsModalTestingRender(false);
     }
   };
 
@@ -661,15 +886,29 @@ export const SettingsView: React.FC = () => {
                         </button>
                       )}
 
+                      {/* Nút Test kết nối (Ping / Auth) */}
                       <button
                         type="button"
                         onClick={() => handleTestProfileConnection(profile)}
-                        disabled={isTesting}
+                        disabled={isTesting || testingRenderProfileId === profile.id}
                         title="Kiểm tra kết nối tới API này"
                         className="p-1.5 border border-[#E2DDD5] dark:border-[#292925] text-[#6E6B64] dark:text-[#8C8B84] hover:text-[#1C1B18] dark:hover:text-[#E8E7E2] hover:border-[#CCC7BE] transition-colors cursor-pointer"
                       >
-                        <RefreshCw size={13} className={isTesting ? 'animate-spin' : ''} />
+                        <RefreshCw size={13} className={isTesting ? 'animate-spin text-[#1C1B18] dark:text-[#D8D3C5]' : ''} />
                       </button>
+
+                      {/* Nút Test model sinh ảnh (nếu role hỗ trợ render) */}
+                      {profile.role !== 'analyze' && !isAnthropic && (
+                        <button
+                          type="button"
+                          onClick={() => handleTestProfileRender(profile)}
+                          disabled={isTesting || testingRenderProfileId === profile.id}
+                          title="Test model sinh ảnh thực tế (Render test)"
+                          className="p-1.5 border border-[#E2DDD5] dark:border-[#292925] text-[#6E6B64] dark:text-[#8C8B84] hover:text-[#1C1B18] dark:hover:text-[#E8E7E2] hover:border-[#CCC7BE] transition-colors cursor-pointer"
+                        >
+                          <Sparkles size={13} className={testingRenderProfileId === profile.id ? 'animate-spin text-[#1C1B18] dark:text-[#D8D3C5]' : ''} />
+                        </button>
+                      )}
 
                       <button
                         type="button"
@@ -695,18 +934,29 @@ export const SettingsView: React.FC = () => {
 
                   {testResult && (
                     <div
-                      className={`mt-3 text-[10px] font-mono px-3 py-1.5 border flex items-center gap-1.5 ${
+                      className={`mt-3 text-[10px] font-mono px-3 py-2 border flex items-center justify-between gap-2 ${
                         testResult.status === 'success'
                           ? 'border-[#22C55E]/30 bg-[#22C55E]/10 text-[#15803D] dark:text-[#4ADE80]'
                           : 'border-[#EF4444]/30 bg-[#EF4444]/10 text-[#B91C1C] dark:text-[#F87171]'
                       }`}
                     >
-                      {testResult.status === 'success' ? (
-                        <CheckCircle2 size={12} />
-                      ) : (
-                        <ExternalLink size={12} />
+                      <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                        {testResult.status === 'success' ? (
+                          <CheckCircle2 size={12} className="shrink-0 text-[#22C55E]" />
+                        ) : (
+                          <ExternalLink size={12} className="shrink-0" />
+                        )}
+                        <span className="truncate">{testResult.message}</span>
+                      </div>
+                      {testResult.imageUrl && (
+                        <div
+                          className="w-7 h-7 shrink-0 border border-current overflow-hidden cursor-pointer hover:scale-110 transition-transform"
+                          onClick={() => setPreviewTestImage(testResult.imageUrl || null)}
+                          title="Xem ảnh sinh thử nghiệm"
+                        >
+                          <img src={testResult.imageUrl} alt="preview" className="w-full h-full object-cover" />
+                        </div>
                       )}
-                      <span>{testResult.message}</span>
                     </div>
                   )}
                 </div>
@@ -1108,6 +1358,117 @@ export const SettingsView: React.FC = () => {
                 />
               </div>
 
+              {/* KHU VỰC TEST PROFILE: VỪA CÓ NÚT TEST KẾT NỐI, VỪA CÓ NÚT TEST MODEL SINH ẢNH */}
+              <div className="p-3.5 bg-[#F2EFE9] dark:bg-[#161614] border border-[#E2DDD5] dark:border-[#292925] space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                  <div>
+                    <span className="text-[10px] uppercase tracking-wider font-semibold text-[#1C1B18] dark:text-[#E8E7E2] flex items-center gap-1.5">
+                      <Zap size={13} className="text-[#9C988F]" />
+                      Kiểm thử Profile trước khi lưu
+                    </span>
+                    <p className="text-[10px] text-[#9C988F] dark:text-[#5E5D57] font-mono mt-0.5">
+                      Xác thực khóa API và kiểm tra khả năng sinh ảnh thực tế của model
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+                    <button
+                      type="button"
+                      onClick={handleModalTestConnection}
+                      disabled={isModalTestingConn || isModalTestingRender}
+                      className="px-3 py-1.5 text-[10px] uppercase font-mono tracking-wider border border-[#1C1B18] dark:border-[#8C8B84] text-[#1C1B18] dark:text-[#E8E7E2] hover:bg-[#1C1B18] hover:text-[#F8F7F4] dark:hover:bg-[#E8E7E2] dark:hover:text-[#0B0B0A] transition-colors cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+                      title="Kiểm tra tính hợp lệ của API Key và kết nối text/analyze"
+                    >
+                      <Radio size={12} className={isModalTestingConn ? 'animate-pulse text-[#22C55E]' : ''} />
+                      <span>{isModalTestingConn ? 'Đang test...' : 'Test kết nối'}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleModalTestRender}
+                      disabled={formProvider === 'anthropic' || isModalTestingConn || isModalTestingRender}
+                      className="px-3 py-1.5 text-[10px] uppercase font-mono tracking-wider bg-[#1C1B18] text-[#F8F7F4] dark:bg-[#D8D3C5] dark:text-[#0B0B0A] hover:bg-[#2F2E2B] dark:hover:bg-[#E8E7E2] transition-colors cursor-pointer flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                      title={formProvider === 'anthropic' ? 'Anthropic không hỗ trợ sinh ảnh' : 'Gửi prompt thử nghiệm sinh 1 ảnh thực tế để test model'}
+                    >
+                      <Sparkles size={12} className={isModalTestingRender ? 'animate-spin' : ''} />
+                      <span>{isModalTestingRender ? 'Đang sinh ảnh...' : 'Test model sinh ảnh'}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Kết quả Test Kết Nối */}
+                {modalConnResult && (
+                  <div
+                    className={`text-[11px] font-mono p-2.5 border flex items-start gap-2 ${
+                      modalConnResult.status === 'success'
+                        ? 'border-[#22C55E]/40 bg-[#22C55E]/10 text-[#15803D] dark:text-[#4ADE80]'
+                        : 'border-[#DC2626]/40 bg-[#DC2626]/10 text-[#B91C1C] dark:text-[#F87171]'
+                    }`}
+                  >
+                    {modalConnResult.status === 'success' ? (
+                      <CheckCircle2 size={14} className="shrink-0 mt-0.5 text-[#22C55E]" />
+                    ) : (
+                      <Info size={14} className="shrink-0 mt-0.5 text-[#DC2626]" />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <span className="font-semibold">
+                        {modalConnResult.status === 'success' ? 'KẾT NỐI OK:' : 'LỖI KẾT NỐI:'}
+                      </span>{' '}
+                      <span>{modalConnResult.message}</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Kết quả Test Sinh Ảnh */}
+                {modalRenderResult && (
+                  <div
+                    className={`text-[11px] font-mono p-2.5 border flex flex-col sm:flex-row items-start gap-3 ${
+                      modalRenderResult.status === 'success'
+                        ? 'border-[#22C55E]/40 bg-[#22C55E]/10 text-[#15803D] dark:text-[#4ADE80]'
+                        : 'border-[#DC2626]/40 bg-[#DC2626]/10 text-[#B91C1C] dark:text-[#F87171]'
+                    }`}
+                  >
+                    <div className="flex items-start gap-2 flex-1 min-w-0">
+                      {modalRenderResult.status === 'success' ? (
+                        <CheckCircle2 size={14} className="shrink-0 mt-0.5 text-[#22C55E]" />
+                      ) : (
+                        <Info size={14} className="shrink-0 mt-0.5 text-[#DC2626]" />
+                      )}
+                      <div>
+                        <span className="font-semibold">
+                          {modalRenderResult.status === 'success' ? 'MODEL SINH ẢNH OK:' : 'LỖI SINH ẢNH:'}
+                        </span>{' '}
+                        <span>{modalRenderResult.message}</span>
+                        {modalRenderResult.modelUsed && (
+                          <p className="text-[10px] text-[#6E6B64] dark:text-[#8C8B84] mt-0.5">
+                            Model đã phản hồi: {modalRenderResult.modelUsed}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    {modalRenderResult.imageUrl && (
+                      <div className="shrink-0 flex items-center gap-2 self-start sm:self-center">
+                        <div
+                          className="w-14 h-14 border border-[#1C1B18] dark:border-[#D8D3C5] overflow-hidden bg-black/5 cursor-pointer relative group"
+                          onClick={() => setPreviewTestImage(modalRenderResult.imageUrl || null)}
+                          title="Bấm để xem ảnh phóng to"
+                        >
+                          <img
+                            src={modalRenderResult.imageUrl}
+                            alt="Ảnh test sinh ra"
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                          />
+                        </div>
+                        <span className="text-[9px] text-[#6E6B64] dark:text-[#8C8B84] font-mono">
+                          (Bấm xem to)
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
               <div className="flex items-center justify-end gap-3 pt-4 border-t border-[#E2DDD5] dark:border-[#1D1D1B]">
                 <button
                   type="button"
@@ -1124,6 +1485,41 @@ export const SettingsView: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* POPUP LIGHTBOX XEM ẢNH TEST PHÓNG TO */}
+      {previewTestImage && (
+        <div
+          className="fixed inset-0 z-60 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 cursor-pointer"
+          onClick={() => setPreviewTestImage(null)}
+        >
+          <div
+            className="max-w-md w-full bg-[#F8F7F4] dark:bg-[#111110] border border-[#1C1B18] dark:border-[#D8D3C5] p-4 space-y-3 cursor-default shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-2 border-b border-[#E2DDD5] dark:border-[#292925]">
+              <span className="text-xs font-mono uppercase tracking-wider text-[#1C1B18] dark:text-[#E8E7E2] flex items-center gap-1.5">
+                <Sparkles size={13} />
+                Ảnh mẫu sinh thử nghiệm
+              </span>
+              <button
+                type="button"
+                onClick={() => setPreviewTestImage(null)}
+                className="text-xs text-[#9C988F] hover:text-[#1C1B18] dark:hover:text-[#E8E7E2] font-mono cursor-pointer"
+              >
+                [ĐÓNG]
+              </button>
+            </div>
+            <img
+              src={previewTestImage}
+              alt="Test render preview"
+              className="w-full aspect-square object-contain bg-black/5 dark:bg-black/20"
+            />
+            <p className="text-[10px] text-[#6E6B64] dark:text-[#8C8B84] font-mono text-center">
+              Tỷ lệ 1:1 • Prompt: A minimalist red origami bird
+            </p>
           </div>
         </div>
       )}

@@ -8,7 +8,8 @@
 
 | # | Commit | Tóm tắt |
 |---|---|---|
-| 11 | `HEAD` | **feat: cloud sync store, fix encoding, and harden lifecycle & storage** — sync settings & history qua JSON file server (/api/sync/*); fix triệt để 5 chỗ mojibake UTF-8; memoize ThemeContext & guard hasSyncedRef; quota fallback cho history localStorage; dẹp warning Vite. |
+| 12 | `HEAD` | **feat: dual test buttons in modal, Imagen SDK support & API logic hardening** — nút Test kết nối + Test model sinh ảnh với preview thumbnail & lightbox; hỗ trợ generateImages cho Imagen 3; parse JSON an toàn cho OpenAI markdown; nâng rate limit AI lên 120; chuẩn hóa OpenAI proxy paths. |
+| 11 | `db3925f` | **feat: cloud sync store, fix encoding, and harden lifecycle & storage** — sync settings & history qua JSON file server (/api/sync/*); fix triệt để 5 chỗ mojibake UTF-8; memoize ThemeContext & guard hasSyncedRef; quota fallback cho history localStorage; dẹp warning Vite. |
 | 10 | `96258a1` | **docs: note Unsplash evaluation decision** — ghi nhận quyết định không tích hợp Unsplash. |
 | 9 | `3c900c8` | **docs: consolidate full change history** — củng cố tài liệu và tham chiếu kiến trúc. |
 | 8 | `e846c68` | **fix: 404 handling + real test-profile endpoint** — thử 3 image paths; extractUpstreamErrorMessage; `/api/test-profile` thật (analyze text + render image probe). |
