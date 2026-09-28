@@ -207,7 +207,20 @@ export const SettingsView: React.FC = () => {
         ? 'analyze'
         : formRole;
 
-    const sanitizedRenderModel = formProvider === 'anthropic' ? '' : formRenderModel.trim();
+    const sanitizedRenderModel =
+      formProvider === 'anthropic' || finalRole === 'analyze' ? '' : formRenderModel.trim();
+    const sanitizedAnalyzeModel =
+      finalRole === 'render' ? '' : formAnalyzeModel.trim();
+
+    if (finalRole !== 'analyze' && formProvider !== 'anthropic' && !sanitizedRenderModel) {
+      alert('Vui lòng nhập Model Sinh ảnh (Render Model).');
+      return;
+    }
+
+    if (finalRole !== 'render' && !sanitizedAnalyzeModel) {
+      alert('Vui lòng nhập Model Phân tích (Analyze Model).');
+      return;
+    }
 
     if (editingProfileId) {
       const updatedProfiles = settings.apiProfiles.map((p) => {
@@ -220,7 +233,7 @@ export const SettingsView: React.FC = () => {
             apiEndpoint: formEndpoint.trim(),
             apiKey: formApiKey.trim(),
             renderModel: sanitizedRenderModel,
-            analyzeModel: formAnalyzeModel.trim(),
+            analyzeModel: sanitizedAnalyzeModel,
             notes: formNotes.trim(),
           };
         }
@@ -240,7 +253,7 @@ export const SettingsView: React.FC = () => {
         apiEndpoint: formEndpoint.trim(),
         apiKey: formApiKey.trim(),
         renderModel: sanitizedRenderModel,
-        analyzeModel: formAnalyzeModel.trim(),
+        analyzeModel: sanitizedAnalyzeModel,
         notes: formNotes.trim(),
         isCustom: true,
         createdAt: new Date().toISOString().split('T')[0],
@@ -456,7 +469,8 @@ export const SettingsView: React.FC = () => {
           provider: formProvider,
           apiKey: formApiKey.trim() || undefined,
           apiEndpoint: formEndpoint.trim() || undefined,
-          analyzeModel: formAnalyzeModel.trim() || undefined,
+          analyzeModel: formRole !== 'render' ? formAnalyzeModel.trim() || undefined : undefined,
+          renderModel: formRole !== 'analyze' ? formRenderModel.trim() || undefined : undefined,
           role: formRole,
           testType: 'connection',
         }),
@@ -1270,8 +1284,12 @@ export const SettingsView: React.FC = () => {
                 </select>
                 <p className="text-[10px] text-[#9C988F] dark:text-[#5E5D57] italic">
                   {formProvider === 'anthropic'
-                    ? 'Anthropic chỉ hỗ trợ phân tích — role render/bị bỏ qua.'
-                    : 'Cả hai: dùng được cho cả sinh ảnh và phân tích.'}
+                    ? 'Anthropic chỉ hỗ trợ phân tích — role render bị vô hiệu hóa.'
+                    : formRole === 'render'
+                    ? 'Chỉ dùng để sinh ảnh (Render Engine) — chỉ cần nhập Model Sinh ảnh bên dưới.'
+                    : formRole === 'analyze'
+                    ? 'Chỉ dùng để phân tích ảnh mẫu (Style Analyzer) — chỉ cần nhập Model Phân tích bên dưới.'
+                    : 'Cả hai: dùng được cho cả sinh ảnh và phân tích ảnh mẫu.'}
                 </p>
               </div>
 
@@ -1288,7 +1306,7 @@ export const SettingsView: React.FC = () => {
                 />
                 {formProvider !== 'gemini' && (
                   <p className="text-[10px] text-[#9C988F] dark:text-[#5E5D57] italic">
-                    Nhập endpoint OpenAI-compatible bất kỳ (VD: 1endpoint.dev, api.together.xyz, OpenRouter...).
+                    Nhập endpoint OpenAI-compatible (VD: https://1endpoint.dev/api/v1 hoặc https://1endpoint.dev, OpenRouter, Together...). Hệ thống tự nhận diện các đường dẫn /api/v1 hoặc /v1.
                   </p>
                 )}
               </div>
@@ -1315,11 +1333,15 @@ export const SettingsView: React.FC = () => {
                 />
               </div>
 
-              {formProvider !== 'anthropic' && (
+              {/* Model Sinh ảnh (Render Model): chỉ hiện khi role là 'render' hoặc 'both' và không phải Anthropic */}
+              {formProvider !== 'anthropic' && formRole !== 'analyze' && (
                 <div className="space-y-1.5">
-                  <label className="block text-[10px] uppercase tracking-wider text-[#6E6B64] dark:text-[#8C8B84] font-medium">
-                    Model Sinh ảnh (Render Model) *
-                  </label>
+                  <div className="flex items-center justify-between">
+                    <label className="block text-[10px] uppercase tracking-wider text-[#6E6B64] dark:text-[#8C8B84] font-medium">
+                      Model Sinh ảnh (Render Model) *
+                    </label>
+                    <span className="text-[9px] font-mono text-[#9C988F]">Render Engine</span>
+                  </div>
                   <input
                     type="text"
                     required
@@ -1328,22 +1350,40 @@ export const SettingsView: React.FC = () => {
                     placeholder={PROVIDER_PRESETS[formProvider].renderModel}
                     className="w-full bg-[#FFFFFF] dark:bg-[#0E0E0D] border border-[#E2DDD5] dark:border-[#292925] p-2.5 text-xs text-[#1C1B18] dark:text-[#E8E7E2] font-mono focus:outline-none focus:border-[#1C1B18] dark:focus:border-[#5E5D57] transition-colors"
                   />
+                  <p className="text-[10px] text-[#9C988F] dark:text-[#5E5D57] italic">
+                    {formProvider === 'openai'
+                      ? 'Ví dụ: gpt-image-2, dall-e-3, dall-e-2, flux-pro, midjourney proxy...'
+                      : 'Ví dụ: imagen-3.0-generate-002'}
+                  </p>
                 </div>
               )}
 
-              <div className="space-y-1.5">
-                <label className="block text-[10px] uppercase tracking-wider text-[#6E6B64] dark:text-[#8C8B84] font-medium">
-                  Model Phân tích (Analyze Model) *
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={formAnalyzeModel}
-                  onChange={(e) => setFormAnalyzeModel(e.target.value)}
-                  placeholder={PROVIDER_PRESETS[formProvider].analyzeModel}
-                  className="w-full bg-[#FFFFFF] dark:bg-[#0E0E0D] border border-[#E2DDD5] dark:border-[#292925] p-2.5 text-xs text-[#1C1B18] dark:text-[#E8E7E2] font-mono focus:outline-none focus:border-[#1C1B18] dark:focus:border-[#5E5D57] transition-colors"
-                />
-              </div>
+              {/* Model Phân tích (Analyze Model): chỉ hiện khi role là 'analyze' hoặc 'both' */}
+              {formRole !== 'render' && (
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-[10px] uppercase tracking-wider text-[#6E6B64] dark:text-[#8C8B84] font-medium">
+                      Model Phân tích (Analyze Model) *
+                    </label>
+                    <span className="text-[9px] font-mono text-[#9C988F]">Style Analyzer</span>
+                  </div>
+                  <input
+                    type="text"
+                    required
+                    value={formAnalyzeModel}
+                    onChange={(e) => setFormAnalyzeModel(e.target.value)}
+                    placeholder={PROVIDER_PRESETS[formProvider].analyzeModel}
+                    className="w-full bg-[#FFFFFF] dark:bg-[#0E0E0D] border border-[#E2DDD5] dark:border-[#292925] p-2.5 text-xs text-[#1C1B18] dark:text-[#E8E7E2] font-mono focus:outline-none focus:border-[#1C1B18] dark:focus:border-[#5E5D57] transition-colors"
+                  />
+                  <p className="text-[10px] text-[#9C988F] dark:text-[#5E5D57] italic">
+                    {formProvider === 'openai'
+                      ? 'Model hỗ trợ Vision/Chat (Ví dụ: gpt-4o, gpt-4o-mini, gpt-5.6-terra...)'
+                      : formProvider === 'anthropic'
+                      ? 'Ví dụ: claude-3-5-sonnet-latest'
+                      : 'Ví dụ: gemini-3.7-flash, gemini-3.1-flash-lite'}
+                  </p>
+                </div>
+              )}
 
               <div className="space-y-1.5">
                 <label className="block text-[10px] uppercase tracking-wider text-[#6E6B64] dark:text-[#8C8B84]">
@@ -1377,22 +1417,24 @@ export const SettingsView: React.FC = () => {
                       onClick={handleModalTestConnection}
                       disabled={isModalTestingConn || isModalTestingRender}
                       className="px-3 py-1.5 text-[10px] uppercase font-mono tracking-wider border border-[#1C1B18] dark:border-[#8C8B84] text-[#1C1B18] dark:text-[#E8E7E2] hover:bg-[#1C1B18] hover:text-[#F8F7F4] dark:hover:bg-[#E8E7E2] dark:hover:text-[#0B0B0A] transition-colors cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
-                      title="Kiểm tra tính hợp lệ của API Key và kết nối text/analyze"
+                      title={formRole === 'render' ? 'Kiểm tra kết nối mạng & xác thực API Key' : 'Kiểm tra tính hợp lệ của API Key và kết nối text/analyze'}
                     >
                       <Radio size={12} className={isModalTestingConn ? 'animate-pulse text-[#22C55E]' : ''} />
                       <span>{isModalTestingConn ? 'Đang test...' : 'Test kết nối'}</span>
                     </button>
 
-                    <button
-                      type="button"
-                      onClick={handleModalTestRender}
-                      disabled={formProvider === 'anthropic' || isModalTestingConn || isModalTestingRender}
-                      className="px-3 py-1.5 text-[10px] uppercase font-mono tracking-wider bg-[#1C1B18] text-[#F8F7F4] dark:bg-[#D8D3C5] dark:text-[#0B0B0A] hover:bg-[#2F2E2B] dark:hover:bg-[#E8E7E2] transition-colors cursor-pointer flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
-                      title={formProvider === 'anthropic' ? 'Anthropic không hỗ trợ sinh ảnh' : 'Gửi prompt thử nghiệm sinh 1 ảnh thực tế để test model'}
-                    >
-                      <Sparkles size={12} className={isModalTestingRender ? 'animate-spin' : ''} />
-                      <span>{isModalTestingRender ? 'Đang sinh ảnh...' : 'Test model sinh ảnh'}</span>
-                    </button>
+                    {formRole !== 'analyze' && (
+                      <button
+                        type="button"
+                        onClick={handleModalTestRender}
+                        disabled={formProvider === 'anthropic' || isModalTestingConn || isModalTestingRender}
+                        className="px-3 py-1.5 text-[10px] uppercase font-mono tracking-wider bg-[#1C1B18] text-[#F8F7F4] dark:bg-[#D8D3C5] dark:text-[#0B0B0A] hover:bg-[#2F2E2B] dark:hover:bg-[#E8E7E2] transition-colors cursor-pointer flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                        title={formProvider === 'anthropic' ? 'Anthropic không hỗ trợ sinh ảnh' : 'Gửi prompt thử nghiệm sinh 1 ảnh thực tế để test model'}
+                      >
+                        <Sparkles size={12} className={isModalTestingRender ? 'animate-spin' : ''} />
+                        <span>{isModalTestingRender ? 'Đang sinh ảnh...' : 'Test model sinh ảnh'}</span>
+                      </button>
+                    )}
                   </div>
                 </div>
 
