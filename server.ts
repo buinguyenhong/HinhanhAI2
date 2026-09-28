@@ -476,7 +476,7 @@ function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Pr
 
 // Default timeouts (override via env)
 const ANALYZE_TIMEOUT_MS = Number(process.env.ANALYZE_TIMEOUT_MS) || 60000; // 60s
-const GENERATE_TIMEOUT_MS = Number(process.env.GENERATE_TIMEOUT_MS) || 90000; // 90s
+const GENERATE_TIMEOUT_MS = Number(process.env.GENERATE_TIMEOUT_MS) || 180000; // 180s (3 phút)
 
 async function analyzeWithGemini(opts: {
   apiKey: string;
@@ -1126,64 +1126,59 @@ async function generateWithGemini(p: GenerateParams): Promise<GeneratedVariant[]
   return out;
 }
 
-async function generateWithOpenAI(p: GenerateParams): Promise<GeneratedVariant[]> {
-  const base = p.apiEndpoint?.replace(/\/$/, '') || 'https://api.openai.com/v1';
-  const candidatePaths = getOpenAIImageCandidatePaths(base);
-  const sizeMap: Record<string, string> = {
-    '1:1': '1024x1024',
-    '16:9': '1792x1024',
-    '9:16': '1024x1792',
-    '4:3': '1024x1024',
-    '3:4': '1024x1024',
-  };
-  const reqBody: Record<string, any> = {
-    model: p.model,
-    prompt: p.prompt,
-    n: p.variations,
-    size: sizeMap[p.aspectRatio] || '1024x1024',
-  };
-  // Chỉ gửi quality nếu model là dall-e-3 (theo chuẩn chính thức của OpenAI)
-  if (/dall-e-3/i.test(p.model)) {
-    reqBody.quality = p.quality === 'standard' ? 'standard' : 'hd';
-  }
+async function singleCallOpenAI(
+  base: string,
+  candidatePaths: string[],
+  apiKey: string,
+  reqBody: Record<string, any>,
+  model: string,
+  baseSeed: number,
+  index: number
+): Promise<GeneratedVariant[]> {
   const body = JSON.stringify(reqBody);
-
   let lastErr = '';
   for (const path of candidatePaths) {
     const url = base + path;
     let response: globalThis.Response;
     try {
-      response = await fetchWithTimeout(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${p.apiKey}`,
+      response = await fetchWithTimeout(
+        url,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body,
         },
-        body,
-      }, GENERATE_TIMEOUT_MS);
+        GENERATE_TIMEOUT_MS
+      );
     } catch (err: any) {
       const isAbort = err?.name === 'AbortError' || /aborted|timeout/i.test(err?.message || '');
-      throw new Error(isAbort
-        ? `Provider phản hồi quá ${GENERATE_TIMEOUT_MS / 1000}s tại ${url}. Vui lòng thử lại hoặc đổi profile.`
-        : `Không thể kết nối ${url}: ${err?.message || err}`);
+      const timeoutSec = Math.round(GENERATE_TIMEOUT_MS / 1000);
+      throw new Error(
+        isAbort
+          ? `Provider phản hồi quá ${timeoutSec}s tại ${url}. Upstream server có thể đang quá tải hoặc hàng đợi tạo ảnh kéo dài. Vui lòng thử lại hoặc giảm số lượng biến thể.`
+          : `Không thể kết nối ${url}: ${err?.message || err}`
+      );
     }
 
     if (response.ok) {
       const data: any = await response.json();
-      const baseSeed = p.seed && p.seed !== '-1' ? parseInt(p.seed, 10) : Math.floor(Math.random() * 900000) + 100000;
       const out: GeneratedVariant[] = [];
       const items = Array.isArray(data?.data)
         ? data.data
         : (Array.isArray(data?.images) ? data.images : []);
       items.forEach((item: any, idx: number) => {
-        const url = typeof item === 'string'
-          ? item
-          : (item?.url || (item?.b64_json ? `data:image/png;base64,${item.b64_json}` : ''));
+        const url =
+          typeof item === 'string'
+            ? item
+            : (item?.url || (item?.b64_json ? `data:image/png;base64,${item.b64_json}` : ''));
         if (url) {
           out.push({
             url,
-            seed: (baseSeed + idx * 941).toString(),
-            modelUsed: `OpenAI ${p.model}`,
+            seed: (baseSeed + (index + idx) * 941).toString(),
+            modelUsed: `OpenAI ${model}`,
           });
         }
       });
@@ -1193,6 +1188,51 @@ async function generateWithOpenAI(p: GenerateParams): Promise<GeneratedVariant[]
 
     const errText = await response.text().catch(() => '');
     const humanMsg = extractUpstreamErrorMessage(response.status, errText);
+
+    // If 400 Bad Request and body had 'size', try falling back once without 'size' (some proxy models strictly only take prompt)
+    if (response.status === 400 && reqBody.size && !/dall-e/i.test(model)) {
+      console.warn(`Custom model ${model} returned 400 with size=${reqBody.size}. Retrying without size parameter...`);
+      const fallbackBody = { ...reqBody };
+      delete fallbackBody.size;
+      try {
+        const retryRes = await fetchWithTimeout(
+          url,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify(fallbackBody),
+          },
+          GENERATE_TIMEOUT_MS
+        );
+        if (retryRes.ok) {
+          const retryData: any = await retryRes.json();
+          const out: GeneratedVariant[] = [];
+          const items = Array.isArray(retryData?.data)
+            ? retryData.data
+            : (Array.isArray(retryData?.images) ? retryData.images : []);
+          items.forEach((item: any, idx: number) => {
+            const imgUrl =
+              typeof item === 'string'
+                ? item
+                : (item?.url || (item?.b64_json ? `data:image/png;base64,${item.b64_json}` : ''));
+            if (imgUrl) {
+              out.push({
+                url: imgUrl,
+                seed: (baseSeed + (index + idx) * 941).toString(),
+                modelUsed: `OpenAI ${model}`,
+              });
+            }
+          });
+          if (out.length > 0) return out;
+        }
+      } catch (retryErr) {
+        console.warn('Fallback without size parameter also failed:', retryErr);
+      }
+    }
+
     // If endpoint route does not exist, try next candidate.
     if (response.status === 404 || response.status === 405) {
       lastErr = `${response.status} @ ${url} → ${humanMsg}`;
@@ -1208,6 +1248,76 @@ async function generateWithOpenAI(p: GenerateParams): Promise<GeneratedVariant[]
     `Endpoint '${base}' không hỗ trợ sinh ảnh (thử ${candidatePaths.join(', ')} đều 404). ` +
     `Hãy chọn endpoint có route OpenAI /images/generations (VD: api.openai.com, 1endpoint.dev/api/v1).`
   );
+}
+
+async function generateWithOpenAI(p: GenerateParams): Promise<GeneratedVariant[]> {
+  const base = p.apiEndpoint?.replace(/\/$/, '') || 'https://api.openai.com/v1';
+  const candidatePaths = getOpenAIImageCandidatePaths(base);
+  const sizeMap: Record<string, string> = {
+    '1:1': '1024x1024',
+    '16:9': '1792x1024',
+    '9:16': '1024x1792',
+    '4:3': '1024x1024',
+    '3:4': '1024x1024',
+  };
+
+  const isDalle2 = /dall-e-2/i.test(p.model);
+  const isDalle3 = /dall-e-3/i.test(p.model);
+  const baseSeed = p.seed && p.seed !== '-1' ? parseInt(p.seed, 10) : Math.floor(Math.random() * 900000) + 100000;
+
+  // DALL-E 2: Native batch support
+  if (isDalle2) {
+    const reqBody: Record<string, any> = {
+      model: p.model,
+      prompt: p.prompt,
+      n: Math.max(1, Math.min(p.variations || 1, 4)),
+      size: '1024x1024',
+    };
+    return singleCallOpenAI(base, candidatePaths, p.apiKey, reqBody, p.model, baseSeed, 0);
+  }
+
+  // DALL-E 3 & Custom Models (gpt-image-2, Flux, Midjourney wrapper, etc.):
+  // Upstream strictly requires n=1 per call. When user requests multiple variations,
+  // execute sequentially so that each variation succeeds independently and any timeout
+  // won't drop previously completed images.
+  const count = Math.max(1, Math.min(p.variations || 1, 4));
+  const out: GeneratedVariant[] = [];
+
+  for (let i = 0; i < count; i++) {
+    const reqBody: Record<string, any> = {
+      model: p.model,
+      prompt: p.prompt,
+    };
+
+    if (isDalle3) {
+      reqBody.n = 1;
+      reqBody.size = sizeMap[p.aspectRatio] || '1024x1024';
+      reqBody.quality = p.quality === 'standard' ? 'standard' : 'hd';
+    } else {
+      // Custom proxy model (e.g. gpt-image-2 on 1endpoint.dev)
+      // When aspect ratio is standard 1:1, omit size to match standard minimal payload
+      if (p.aspectRatio && p.aspectRatio !== '1:1' && sizeMap[p.aspectRatio]) {
+        reqBody.size = sizeMap[p.aspectRatio];
+      }
+    }
+
+    try {
+      const variants = await singleCallOpenAI(base, candidatePaths, p.apiKey, reqBody, p.model, baseSeed, i);
+      out.push(...variants);
+    } catch (err: any) {
+      // If we already generated at least 1 image, return it rather than failing the whole user request
+      if (out.length > 0) {
+        console.warn(`Variant ${i} failed, returning ${out.length} successful variant(s):`, err?.message);
+        break;
+      }
+      throw err;
+    }
+  }
+
+  if (out.length === 0) {
+    throw new Error('Không nhận được hình ảnh nào từ provider.');
+  }
+  return out;
 }
 
 // Endpoint: AI Image Generation (multi-provider; no Pollinations fallback)

@@ -33,6 +33,7 @@ export interface AppSettings {
   driveConnected: boolean;
   driveAccount: string;
   driveFolder: string;
+  driveClientId?: string;
   autoSync: boolean;
   // Default Render Settings
   defaultQuality: 'standard' | 'high' | 'raw';
@@ -69,6 +70,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   driveConnected: false,
   driveAccount: '',
   driveFolder: 'HinhanhAI/Exports',
+  driveClientId: '',
   autoSync: false,
   defaultQuality: 'high',
   defaultRatio: 'original',

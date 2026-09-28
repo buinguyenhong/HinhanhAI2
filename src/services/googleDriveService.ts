@@ -13,8 +13,39 @@ declare global {
 const DRIVE_OAUTH_TOKEN_KEY = 'google_drive_access_token';
 const DRIVE_USER_EMAIL_KEY = 'google_drive_user_email';
 const DRIVE_EXPIRES_AT_KEY = 'google_drive_token_expires_at';
+const DRIVE_CLIENT_ID_KEY = 'google_drive_client_id';
 
 let tokenClient: any = null;
+
+export function getGoogleClientId(): string {
+  const direct = localStorage.getItem(DRIVE_CLIENT_ID_KEY);
+  if (direct && direct.trim()) return direct.trim();
+
+  try {
+    const raw = localStorage.getItem('hinhanhai_app_settings_v4');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed.driveClientId && typeof parsed.driveClientId === 'string' && parsed.driveClientId.trim()) {
+        return parsed.driveClientId.trim();
+      }
+    }
+  } catch {}
+
+  const envId = (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID;
+  if (envId && typeof envId === 'string' && envId.trim()) {
+    return envId.trim();
+  }
+
+  return '';
+}
+
+export function setGoogleClientId(clientId: string): void {
+  if (clientId && clientId.trim()) {
+    localStorage.setItem(DRIVE_CLIENT_ID_KEY, clientId.trim());
+  } else {
+    localStorage.removeItem(DRIVE_CLIENT_ID_KEY);
+  }
+}
 
 export interface DriveUserInfo {
   email: string;
@@ -79,13 +110,20 @@ export function getStoredUserEmail(): string | null {
 /**
  * Initiates Google OAuth Login Flow for Google Drive permissions
  */
-export async function authenticateWithGoogleDrive(): Promise<{ token: string; email: string }> {
+export async function authenticateWithGoogleDrive(customClientId?: string): Promise<{ token: string; email: string }> {
+  const clientId = (customClientId || getGoogleClientId()).trim();
+  if (!clientId) {
+    throw new Error(
+      'Chưa cấu hình Google OAuth Client ID. Vui lòng nhập Google Client ID trong mục Google Drive (Cài đặt) để đăng nhập.'
+    );
+  }
+
   await loadGsiScript();
 
   return new Promise((resolve, reject) => {
     try {
       tokenClient = window.google.accounts.oauth2.initTokenClient({
-        client_id: '', // Handled seamlessly via AI Studio OAuth environment
+        client_id: clientId,
         scope: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email',
         callback: async (tokenResponse: any) => {
           if (tokenResponse.error) {

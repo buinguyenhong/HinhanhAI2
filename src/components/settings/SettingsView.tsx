@@ -40,6 +40,8 @@ import { getAuthHeaders, handleAuthExpired } from '../../services/authService';
 import {
   authenticateWithGoogleDrive,
   disconnectGoogleDrive,
+  getGoogleClientId,
+  setGoogleClientId,
 } from '../../services/googleDriveService';
 
 const PROVIDER_PRESETS: Record<
@@ -80,7 +82,8 @@ export const SettingsView: React.FC = () => {
   const [savedSuccess, setSavedSuccess] = useState(false);
 
   const [showDriveConnectModal, setShowDriveConnectModal] = useState(false);
-  const [driveEmailInput, setDriveEmailInput] = useState('');
+  const [driveClientIdInput, setDriveClientIdInput] = useState(() => settings.driveClientId || getGoogleClientId() || '');
+  const [isConnectingDrive, setIsConnectingDrive] = useState(false);
 
   const [testingProfileId, setTestingProfileId] = useState<string | null>(null);
   const [testingRenderProfileId, setTestingRenderProfileId] = useState<string | null>(null);
@@ -608,17 +611,26 @@ export const SettingsView: React.FC = () => {
     }
   };
 
-  const handleConnectDrive = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
+  const handleConnectDrive = async (customId?: string) => {
+    const targetId = (typeof customId === 'string' ? customId : (driveClientIdInput || settings.driveClientId || getGoogleClientId())).trim();
+    if (!targetId) {
+      setShowDriveConnectModal(true);
+      return;
+    }
+
+    setIsConnectingDrive(true);
     try {
-      const auth = await authenticateWithGoogleDrive();
+      setGoogleClientId(targetId);
+      handleUpdate('driveClientId', targetId);
+      const auth = await authenticateWithGoogleDrive(targetId);
       handleUpdate('driveConnected', true);
       handleUpdate('driveAccount', auth.email || 'connected-user@google.com');
       setShowDriveConnectModal(false);
-      setDriveEmailInput('');
     } catch (err: any) {
       console.error('Failed to authenticate with Google Drive:', err);
       alert(`Kết nối Google Drive thất bại: ${err?.message || 'Vui lòng cho phép quyền truy cập'}`);
+    } finally {
+      setIsConnectingDrive(false);
     }
   };
 
@@ -1076,41 +1088,100 @@ export const SettingsView: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => handleConnectDrive()}
-                    className="text-[10px] font-mono uppercase px-3 py-1 bg-[#1C1B18] hover:bg-[#2F2E2B] text-[#F8F7F4] dark:bg-[#D8D3C5] dark:hover:bg-[#E8E7E2] dark:text-[#0B0B0A] transition-colors flex items-center gap-1 cursor-pointer font-medium"
+                    disabled={isConnectingDrive}
+                    className="text-[10px] font-mono uppercase px-3.5 py-1.5 bg-[#1C1B18] hover:bg-[#2F2E2B] text-[#F8F7F4] dark:bg-[#D8D3C5] dark:hover:bg-[#E8E7E2] dark:text-[#0B0B0A] transition-colors flex items-center gap-1.5 cursor-pointer font-medium disabled:opacity-60"
                   >
-                    <Link2 size={11} /> Đăng nhập Google Drive
+                    {isConnectingDrive ? (
+                      <>
+                        <RefreshCw size={11} className="animate-spin" /> Đang kết nối...
+                      </>
+                    ) : (
+                      <>
+                        <Link2 size={11} /> Đăng nhập Google Drive
+                      </>
+                    )}
                   </button>
                 )}
               </div>
             </div>
 
+            {/* Google OAuth Client ID Input */}
+            <div className="space-y-1.5 pt-1 border-t border-[#F2EFE9] dark:border-[#1E1E1C]">
+              <div className="flex items-center justify-between">
+                <label className="block text-[10px] uppercase tracking-wider text-[#6E6B64] dark:text-[#8C8B84] font-mono">
+                  Google OAuth 2.0 Client ID (Bắt buộc cho Google Identity Services)
+                </label>
+                <a
+                  href="https://console.cloud.google.com/apis/credentials"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-[9px] font-mono text-[#9C988F] hover:text-[#1C1B18] dark:hover:text-[#E8E7E2] flex items-center gap-1 underline underline-offset-2"
+                >
+                  <ExternalLink size={10} /> Google Cloud Console
+                </a>
+              </div>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={driveClientIdInput}
+                  onChange={(e) => {
+                    setDriveClientIdInput(e.target.value);
+                    handleUpdate('driveClientId', e.target.value);
+                    setGoogleClientId(e.target.value);
+                  }}
+                  placeholder="VD: 1234567890-abcdefgh1234.apps.googleusercontent.com"
+                  className="flex-1 bg-[#F5F3ED] dark:bg-[#0E0E0D] border border-[#E2DDD5] dark:border-[#292925] p-2 text-xs text-[#1C1B18] dark:text-[#E8E7E2] font-mono focus:outline-none focus:border-[#1C1B18] dark:focus:border-[#5E5D57] transition-colors"
+                />
+                {!settings.driveConnected && (
+                  <button
+                    type="button"
+                    onClick={() => handleConnectDrive()}
+                    disabled={isConnectingDrive || !driveClientIdInput.trim()}
+                    className="px-3 py-2 text-[10px] font-mono uppercase bg-[#1C1B18] hover:bg-[#2F2E2B] text-[#F8F7F4] dark:bg-[#D8D3C5] dark:hover:bg-[#E8E7E2] dark:text-[#0B0B0A] transition-colors cursor-pointer font-medium disabled:opacity-40"
+                  >
+                    Kết nối
+                  </button>
+                )}
+              </div>
+              <p className="text-[9px] text-[#9C988F] dark:text-[#5E5D57] font-mono leading-relaxed">
+                Tạo OAuth 2.0 Client ID loại <strong className="text-[#6E6B64] dark:text-[#A8A7A0]">Web application</strong>. Thêm <code className="bg-[#EAE6DF] dark:bg-[#1E1E1C] px-1 py-0.5">{typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5173'}</code> vào mục <strong className="text-[#6E6B64] dark:text-[#A8A7A0]">Authorized JavaScript origins</strong> và bật <strong className="text-[#6E6B64] dark:text-[#A8A7A0]">Google Drive API</strong>.
+              </p>
+            </div>
+
             {showDriveConnectModal && (
-              <form
-                onSubmit={handleConnectDrive}
-                className="p-4 border border-[#1C1B18] dark:border-[#D8D3C5] bg-[#F8F7F4] dark:bg-[#161614] space-y-3"
-              >
+              <div className="p-4 border border-[#1C1B18] dark:border-[#D8D3C5] bg-[#F8F7F4] dark:bg-[#161614] space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] uppercase font-medium text-[#1C1B18] dark:text-[#E8E7E2]">
-                    Xác nhận tài khoản Google
+                  <span className="text-[10px] uppercase font-medium text-[#1C1B18] dark:text-[#E8E7E2] flex items-center gap-1.5">
+                    <Info size={13} className="text-[#EAB308]" /> Cần nhập Google OAuth Client ID
                   </span>
                   <button
                     type="button"
                     onClick={() => setShowDriveConnectModal(false)}
                     className="text-[10px] text-[#9C988F] hover:text-[#1C1B18] dark:hover:text-[#E8E7E2] cursor-pointer"
                   >
-                    Hủy
+                    Đóng
                   </button>
                 </div>
+                <p className="text-[11px] text-[#6E6B64] dark:text-[#A8A7A0] leading-relaxed">
+                  Để kết nối trực tiếp với Google Drive qua thư viện Google Identity Services (GIS), bạn cần nhập Google OAuth 2.0 Client ID:
+                </p>
+                <ol className="text-[10px] font-mono text-[#6E6B64] dark:text-[#8C8B84] list-decimal list-inside space-y-1 bg-[#FFFFFF] dark:bg-[#0E0E0D] p-3 border border-[#E2DDD5] dark:border-[#292925]">
+                  <li>Truy cập <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noreferrer" className="underline text-[#1C1B18] dark:text-[#E8E7E2]">Google Cloud Credentials</a></li>
+                  <li>Nhấn <strong>Create Credentials</strong> &rarr; <strong>OAuth client ID</strong> &rarr; Application type: <strong>Web application</strong></li>
+                  <li>Thêm <code className="bg-[#EAE6DF] dark:bg-[#1C1C1A] px-1">{typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5173'}</code> vào <strong>Authorized JavaScript origins</strong></li>
+                  <li>Copy <strong>Client ID</strong> dán vào ô bên dưới:</li>
+                </ol>
                 <div className="space-y-1">
-                  <label className="block text-[9px] text-[#6E6B64] dark:text-[#8C8B84]">
-                    Nhập email tài khoản Google Drive của bạn
-                  </label>
                   <input
-                    type="email"
+                    type="text"
                     required
-                    value={driveEmailInput}
-                    onChange={(e) => setDriveEmailInput(e.target.value)}
-                    placeholder="user@gmail.com"
+                    value={driveClientIdInput}
+                    onChange={(e) => {
+                      setDriveClientIdInput(e.target.value);
+                      handleUpdate('driveClientId', e.target.value);
+                      setGoogleClientId(e.target.value);
+                    }}
+                    placeholder="xxxxxxxxx.apps.googleusercontent.com"
                     className="w-full bg-[#FFFFFF] dark:bg-[#0E0E0D] border border-[#E2DDD5] dark:border-[#292925] p-2 text-xs text-[#1C1B18] dark:text-[#E8E7E2] font-mono focus:outline-none"
                   />
                 </div>
@@ -1120,16 +1191,19 @@ export const SettingsView: React.FC = () => {
                     onClick={() => setShowDriveConnectModal(false)}
                     className="px-3 py-1.5 text-[10px] uppercase border border-[#E2DDD5] dark:border-[#292925] text-[#6E6B64] dark:text-[#8C8B84] cursor-pointer"
                   >
-                    Đóng
+                    Hủy
                   </button>
                   <button
-                    type="submit"
-                    className="px-4 py-1.5 text-[10px] uppercase bg-[#1C1B18] text-[#F8F7F4] dark:bg-[#D8D3C5] dark:text-[#0B0B0A] font-medium cursor-pointer"
+                    type="button"
+                    onClick={() => handleConnectDrive(driveClientIdInput)}
+                    disabled={isConnectingDrive || !driveClientIdInput.trim()}
+                    className="px-4 py-1.5 text-[10px] uppercase bg-[#1C1B18] text-[#F8F7F4] dark:bg-[#D8D3C5] dark:text-[#0B0B0A] font-medium cursor-pointer disabled:opacity-40 flex items-center gap-1.5"
                   >
-                    Xác nhận kết nối
+                    {isConnectingDrive ? <RefreshCw size={11} className="animate-spin" /> : <Link2 size={11} />}
+                    Xác nhận & Đăng nhập
                   </button>
                 </div>
-              </form>
+              </div>
             )}
 
             <div className="space-y-2 pt-2">
