@@ -23,6 +23,7 @@ import {
   Server,
   Zap,
   Info,
+  Copy,
   Image as ImageIcon,
 } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
@@ -84,6 +85,14 @@ export const SettingsView: React.FC = () => {
   const [showDriveConnectModal, setShowDriveConnectModal] = useState(false);
   const [driveClientIdInput, setDriveClientIdInput] = useState(() => settings.driveClientId || getGoogleClientId() || '');
   const [isConnectingDrive, setIsConnectingDrive] = useState(false);
+  const [copiedOrigin, setCopiedOrigin] = useState(false);
+
+  const handleCopyOrigin = () => {
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5173';
+    navigator.clipboard.writeText(origin);
+    setCopiedOrigin(true);
+    setTimeout(() => setCopiedOrigin(false), 2000);
+  };
 
   const [testingProfileId, setTestingProfileId] = useState<string | null>(null);
   const [testingRenderProfileId, setTestingRenderProfileId] = useState<string | null>(null);
@@ -1143,9 +1152,28 @@ export const SettingsView: React.FC = () => {
                   </button>
                 )}
               </div>
-              <p className="text-[9px] text-[#9C988F] dark:text-[#5E5D57] font-mono leading-relaxed">
-                Tạo OAuth 2.0 Client ID loại <strong className="text-[#6E6B64] dark:text-[#A8A7A0]">Web application</strong>. Thêm <code className="bg-[#EAE6DF] dark:bg-[#1E1E1C] px-1 py-0.5">{typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5173'}</code> vào mục <strong className="text-[#6E6B64] dark:text-[#A8A7A0]">Authorized JavaScript origins</strong> và bật <strong className="text-[#6E6B64] dark:text-[#A8A7A0]">Google Drive API</strong>.
-              </p>
+              {/* Origin Mismatch Guide & Copy Tool */}
+              <div className="p-3 bg-[#FAF8F5] dark:bg-[#151513] border border-[#E2DDD5] dark:border-[#242420] space-y-2 mt-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-mono font-medium text-[#1C1B18] dark:text-[#E8E7E2]">
+                    Authorized JavaScript Origin của bạn:
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleCopyOrigin}
+                    className="text-[9px] font-mono px-2 py-0.5 border border-[#1C1B18] dark:border-[#D8D3C5] bg-[#1C1B18] text-[#F8F7F4] dark:bg-[#D8D3C5] dark:text-[#0B0B0A] flex items-center gap-1 cursor-pointer font-medium"
+                  >
+                    {copiedOrigin ? <Check size={10} /> : <Copy size={10} />}
+                    {copiedOrigin ? 'Đã sao chép' : 'Sao chép Origin'}
+                  </button>
+                </div>
+                <code className="block text-[11px] font-mono font-bold text-[#1C1B18] dark:text-[#F8F7F4] bg-[#FFFFFF] dark:bg-[#0E0E0D] px-2.5 py-1.5 border border-[#E2DDD5] dark:border-[#292925] select-all">
+                  {typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5173'}
+                </code>
+                <p className="text-[9px] font-mono text-[#9C988F] dark:text-[#7A7870] leading-relaxed">
+                  ⚠️ <strong>Khắc phục Lỗi 400: origin_mismatch</strong>: Truy cập Google Cloud Console &rarr; Client ID của bạn &rarr; mục <strong>Authorized JavaScript origins</strong> &rarr; nhấn <strong>ADD URI</strong> rồi dán chính xác URI trên (không có dấu <code>/</code> ở cuối). Nếu bạn truy cập bằng cả <code>http://localhost:5173</code> và <code>http://127.0.0.1:5173</code>, hãy thêm cả 2 URI rồi bấm Save.
+                </p>
+              </div>
             </div>
 
             {showDriveConnectModal && (
@@ -1168,7 +1196,7 @@ export const SettingsView: React.FC = () => {
                 <ol className="text-[10px] font-mono text-[#6E6B64] dark:text-[#8C8B84] list-decimal list-inside space-y-1 bg-[#FFFFFF] dark:bg-[#0E0E0D] p-3 border border-[#E2DDD5] dark:border-[#292925]">
                   <li>Truy cập <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noreferrer" className="underline text-[#1C1B18] dark:text-[#E8E7E2]">Google Cloud Credentials</a></li>
                   <li>Nhấn <strong>Create Credentials</strong> &rarr; <strong>OAuth client ID</strong> &rarr; Application type: <strong>Web application</strong></li>
-                  <li>Thêm <code className="bg-[#EAE6DF] dark:bg-[#1C1C1A] px-1">{typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5173'}</code> vào <strong>Authorized JavaScript origins</strong></li>
+                  <li>Thêm <code className="bg-[#EAE6DF] dark:bg-[#1C1C1A] px-1 font-bold">{typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5173'}</code> vào <strong>Authorized JavaScript origins</strong> (tránh lỗi 400 origin_mismatch)</li>
                   <li>Copy <strong>Client ID</strong> dán vào ô bên dưới:</li>
                 </ol>
                 <div className="space-y-1">
