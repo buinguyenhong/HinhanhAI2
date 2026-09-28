@@ -549,6 +549,9 @@ async function analyzeWithGemini(opts: {
 
   function getOpenAIImageCandidatePaths(base: string): string[] {
     const clean = base.replace(/\/$/, '');
+    if (/\/images\/generations$/i.test(clean)) {
+      return [''];
+    }
     if (/\/v1$/i.test(clean)) {
       return ['/images/generations', '/images'];
     }
@@ -565,6 +568,9 @@ async function analyzeWithGemini(opts: {
 
   function getOpenAIChatCandidatePaths(base: string): string[] {
     const clean = base.replace(/\/$/, '');
+    if (/\/chat\/completions$/i.test(clean)) {
+      return [''];
+    }
     if (/\/v1$/i.test(clean)) {
       return ['/chat/completions'];
     }
@@ -1007,6 +1013,14 @@ async function extractSubjectFacialProfile(opts: {
   const cleanBase64 = opts.imageBase64.replace(/^data:image\/[a-zA-Z0-9+]+;base64,/, '');
   if (!cleanBase64) return null;
 
+  // IMPORTANT: Only invoke GoogleGenAI if apiKey looks like a valid Google API key
+  // (starts with AIza or AQ, or matches process.env.GEMINI_API_KEY).
+  // Never pass an OpenAI / 1endpoint key (e.g. efy_pat... or sk-...) to Google SDK.
+  const isGoogleKey = /^AIza|^AQ\./.test(opts.apiKey) || (Boolean(process.env.GEMINI_API_KEY) && opts.apiKey === process.env.GEMINI_API_KEY);
+  if (!isGoogleKey) {
+    return null;
+  }
+
   try {
     const ai = new GoogleGenAI({
       apiKey: opts.apiKey,
@@ -1015,7 +1029,7 @@ async function extractSubjectFacialProfile(opts: {
 
     const targetModel = opts.model || 'gemini-2.5-flash';
 
-    const response = await ai.models.generateContent({
+    const extractionPromise = ai.models.generateContent({
       model: targetModel,
       contents: {
         parts: [
@@ -1043,6 +1057,12 @@ Output ONLY the descriptive text, no preamble, no markdown fences, no bullet poi
         ],
       },
     });
+
+    const timeoutPromise = new Promise<null>((_, reject) =>
+      setTimeout(() => reject(new Error('Facial extraction timed out after 15s')), 15000)
+    );
+
+    const response: any = await Promise.race([extractionPromise, timeoutPromise]);
 
     const text = response?.text?.trim();
     if (text && text.length > 20) {
@@ -1209,6 +1229,9 @@ async function singleCallOpenAI(
           headers: {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${apiKey}`,
+            'User-Agent': 'HinhanhAI/2.0 (Windows NT 10.0; Win64; x64)',
+            Accept: 'application/json',
+            Connection: 'close',
           },
           body,
         },
@@ -1250,11 +1273,12 @@ async function singleCallOpenAI(
     const errText = await response.text().catch(() => '');
     const humanMsg = extractUpstreamErrorMessage(response.status, errText);
 
-    // If 400 Bad Request and body had 'size', try falling back once without 'size' (some proxy models strictly only take prompt)
-    if (response.status === 400 && reqBody.size && !/dall-e/i.test(model)) {
-      console.warn(`Custom model ${model} returned 400 with size=${reqBody.size}. Retrying without size parameter...`);
+    // If 400 Bad Request and body had 'size' or 'quality', try falling back once with minimal body
+    if (response.status === 400 && (reqBody.size || reqBody.quality) && !/dall-e/i.test(model)) {
+      console.warn(`Custom model ${model} returned 400 with optional params. Retrying with minimal parameters...`);
       const fallbackBody = { ...reqBody };
       delete fallbackBody.size;
+      delete fallbackBody.quality;
       try {
         const retryRes = await fetchWithTimeout(
           url,
@@ -1263,6 +1287,9 @@ async function singleCallOpenAI(
             headers: {
               'Content-Type': 'application/json',
               Authorization: `Bearer ${apiKey}`,
+              'User-Agent': 'HinhanhAI/2.0 (Windows NT 10.0; Win64; x64)',
+              Accept: 'application/json',
+              Connection: 'close',
             },
             body: JSON.stringify(fallbackBody),
           },
@@ -1290,7 +1317,7 @@ async function singleCallOpenAI(
           if (out.length > 0) return out;
         }
       } catch (retryErr) {
-        console.warn('Fallback without size parameter also failed:', retryErr);
+        console.warn('Fallback without optional parameters also failed:', retryErr);
       }
     }
 
@@ -1359,6 +1386,10 @@ async function generateWithOpenAI(p: GenerateParams): Promise<GeneratedVariant[]
       // When aspect ratio is standard 1:1, omit size to match standard minimal payload
       if (p.aspectRatio && p.aspectRatio !== '1:1' && sizeMap[p.aspectRatio]) {
         reqBody.size = sizeMap[p.aspectRatio];
+      }
+      // For gpt-image-2, quality must be one of: 'auto', 'low', 'medium'
+      if (/gpt-image-2/i.test(p.model)) {
+        reqBody.quality = p.quality === 'standard' ? 'low' : (p.quality === 'high' ? 'auto' : 'medium');
       }
     }
 
@@ -1469,6 +1500,12 @@ app.post('/api/generate-image', aiLimiter, async (req, res) => {
         `[CRITICAL SUBJECT IDENTITY & ${fidelityPct}% FACE PRESERVATION]: The primary subject MUST be the EXACT SAME CHARACTER from the reference portrait. ` +
         `Biometric facial features & appearance: ${detectedSubjectProfile}. ` +
         `Maintain 100% identical facial bone structure, jawline, eye shape, nose shape, lips, skin tone, hairstyle, and character identity with ZERO facial alteration or morphing. ` +
+        `Generate this exact person in the requested scene: `;
+      finalPrompt = `${faceLockPrefix}${trimmedPrompt}`;
+    } else if (sourceImageBase64 && (preserveStructure || preserveFace)) {
+      const fidelityPct = Math.round(controlNetWeight * 100);
+      const faceLockPrefix =
+        `[CRITICAL CHARACTER & FACE PRESERVATION (${fidelityPct}% LIKENESS)]: Maintain the EXACT SAME human subject, identical facial bone structure, jawline, eye shape, nose shape, lip shape, hairstyle, skin tone, and character identity from the reference portrait with ZERO facial alteration or person swap. ` +
         `Generate this exact person in the requested scene: `;
       finalPrompt = `${faceLockPrefix}${trimmedPrompt}`;
     }
