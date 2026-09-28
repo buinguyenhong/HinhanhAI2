@@ -10,6 +10,7 @@ export interface GenerationSettings {
   quality: QualityMode;
   variations: number;
   preserveStructure: boolean;
+  preserveFace?: boolean;
   controlNetWeight: number;
   negativePrompt: string;
   seed: string;

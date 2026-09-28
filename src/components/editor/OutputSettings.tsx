@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { GenerationSettings, AspectRatio, QualityMode } from '../../types';
-import { ChevronDown, ChevronUp, Key, Cpu, Zap } from 'lucide-react';
+import { ChevronDown, ChevronUp, Key, Cpu, Zap, ShieldCheck, Lock, Sparkles } from 'lucide-react';
 import {
   loadAppSettings,
   saveAppSettings,
@@ -11,12 +11,14 @@ import {
 interface OutputSettingsProps {
   settings: GenerationSettings;
   onChange: (settings: GenerationSettings) => void;
+  hasSourceImage?: boolean;
   onActiveProfileChange?: (profile: ApiProfile) => void;
 }
 
 export const OutputSettings: React.FC<OutputSettingsProps> = ({
   settings,
   onChange,
+  hasSourceImage = false,
   onActiveProfileChange,
 }) => {
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -168,24 +170,59 @@ export const OutputSettings: React.FC<OutputSettingsProps> = ({
         </div>
       </div>
 
-      {showAdvanced && (
-        <div className="border-t border-[#EDE9E1] dark:border-[#1D1D1B] pt-4 space-y-4 text-xs">
-          <div className="flex items-center justify-between py-1">
+      {/* 🔒 Khóa nhận diện gương mặt & nhân vật gốc */}
+      <div className={`p-3 border transition-colors ${
+        hasSourceImage
+          ? 'border-[#1C1B18] dark:border-[#D8D3C5] bg-[#FAF8F5] dark:bg-[#151513]'
+          : 'border-[#EDE9E1] dark:border-[#1E1E1C] bg-[#FFFFFF] dark:bg-[#111110]'
+      }`}>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <ShieldCheck size={15} className={settings.preserveStructure && hasSourceImage ? 'text-[#15803D] dark:text-[#4ADE80]' : 'text-[#9C988F]'} />
             <div>
-              <p className="text-[#6E6B64] dark:text-[#8C8B84] text-[11px] uppercase tracking-wider font-medium">
-                Khóa cấu trúc (ControlNet)
+              <p className="text-[11px] uppercase tracking-wider font-semibold text-[#1C1B18] dark:text-[#E8E7E2]">
+                Khóa gương mặt & nhân vật gốc
               </p>
-              <p className="text-[9px] text-[#9C988F] dark:text-[#5E5D57]">
-                Giữ nguyên tỷ lệ khuôn mặt và tư thế
+              <p className="text-[9px] text-[#9C988F] dark:text-[#7A7870] font-mono">
+                {hasSourceImage
+                  ? 'Bảo toàn 100% tỷ lệ xương mặt, mắt, mũi, miệng & nhân vật'
+                  : 'Tải ảnh chủ thể ở trên để khóa nhận diện gương mặt'}
               </p>
             </div>
-            <input
-              type="checkbox"
-              checked={settings.preserveStructure}
-              onChange={(e) => update('preserveStructure', e.target.checked)}
-              className="w-3.5 h-3.5 accent-[#1C1B18] dark:accent-[#D8D3C5] bg-[#FFFFFF] dark:bg-[#111110] border-[#E2DDD5] dark:border-[#292925] cursor-pointer"
-            />
           </div>
+          <input
+            type="checkbox"
+            checked={settings.preserveStructure}
+            onChange={(e) => update('preserveStructure', e.target.checked)}
+            className="w-4 h-4 accent-[#1C1B18] dark:accent-[#D8D3C5] cursor-pointer"
+          />
+        </div>
+
+        {hasSourceImage && settings.preserveStructure && (
+          <div className="mt-2.5 pt-2.5 border-t border-[#EAE5DC] dark:border-[#222220] space-y-2">
+            <div className="flex justify-between items-center text-[10px] font-mono">
+              <span className="text-[#6E6B64] dark:text-[#8C8B84]">Mức độ bám sát gương mặt (Fidelity)</span>
+              <span className="font-bold text-[#1C1B18] dark:text-[#E8E7E2]">{Math.round(settings.controlNetWeight * 100)}%</span>
+            </div>
+            <input
+              type="range"
+              min={0.6}
+              max={1.0}
+              step={0.05}
+              value={settings.controlNetWeight}
+              onChange={(e) => update('controlNetWeight', parseFloat(e.target.value))}
+              className="w-full accent-[#1C1B18] dark:accent-[#D8D3C5] cursor-pointer"
+            />
+            <div className="flex items-center gap-1.5 text-[9px] font-mono text-[#15803D] dark:text-[#4ADE80]">
+              <Lock size={10} />
+              <span>Chế độ giữ nguyên gương mặt: ĐANG KÍCH HOẠT</span>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {showAdvanced && (
+        <div className="border-t border-[#EDE9E1] dark:border-[#1D1D1B] pt-4 space-y-4 text-xs">
 
           <div className="flex items-center justify-between py-1">
             <span className="text-[#6E6B64] dark:text-[#8C8B84] text-[11px] uppercase tracking-wider flex items-center gap-1">

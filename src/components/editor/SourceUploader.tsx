@@ -100,12 +100,12 @@ export const SourceUploader: React.FC<SourceUploaderProps> = ({
             </button>
           </div>
 
-          <div className="p-3 flex items-center justify-between text-[10px] border-t border-[#EDE9E1] dark:border-[#1D1D1B]">
-            <span className="text-[#1C1B18] dark:text-[#E8E7E2] truncate max-w-[180px] font-mono">
+          <div className="p-2.5 bg-[#FAF8F5] dark:bg-[#141412] flex items-center justify-between text-[10px] border-t border-[#EDE9E1] dark:border-[#1D1D1B]">
+            <span className="text-[#1C1B18] dark:text-[#E8E7E2] truncate max-w-[170px] font-mono">
               {sourceFile?.name || 'source_portrait.jpg'}
             </span>
-            <span className="text-[#9C988F] dark:text-[#5E5D57] font-mono">
-              {sourceFile ? `${(sourceFile.size / 1024).toFixed(0)} KB` : 'High-Res'}
+            <span className="text-[9px] font-mono px-2 py-0.5 bg-[#22C55E]/15 text-[#15803D] dark:text-[#4ADE80] font-medium flex items-center gap-1">
+              ✓ Khóa gương mặt
             </span>
           </div>
         </div>

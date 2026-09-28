@@ -883,6 +883,9 @@ const generateImageSchema = z.object({
   apiEndpoint: z.string().max(500).optional().nullable(),
   sourceImageBase64: z.string().optional().nullable(),
   referenceImageBase64: z.string().optional().nullable(),
+  preserveStructure: z.boolean().optional().default(true),
+  preserveFace: z.boolean().optional().default(true),
+  controlNetWeight: z.number().optional().default(0.85),
 });
 
 // Helper: validate custom endpoint URL shape only.
@@ -992,6 +995,64 @@ app.post('/api/gemini/analyze-style', aiLimiter, async (req, res) => {
     });
   }
 });
+
+// --- SUBJECT BIOMETRIC & FACIAL IDENTITY EXTRACTION ENGINE ---
+// Analyzes human subject in source image to extract exact facial bone structure,
+// eye shape, nose, lips, hair, skin, age, and ethnicity to lock character identity.
+async function extractSubjectFacialProfile(opts: {
+  imageBase64: string;
+  apiKey: string;
+  model?: string;
+}): Promise<string | null> {
+  const cleanBase64 = opts.imageBase64.replace(/^data:image\/[a-zA-Z0-9+]+;base64,/, '');
+  if (!cleanBase64) return null;
+
+  try {
+    const ai = new GoogleGenAI({
+      apiKey: opts.apiKey,
+      httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
+    });
+
+    const targetModel = opts.model || 'gemini-2.5-flash';
+
+    const response = await ai.models.generateContent({
+      model: targetModel,
+      contents: {
+        parts: [
+          {
+            inlineData: {
+              mimeType: 'image/jpeg',
+              data: cleanBase64,
+            },
+          },
+          {
+            text: `You are an expert biometric portrait analyst and character consistency director for AI visual generation.
+Analyze the primary person/character in this photo with surgical detail so an AI image model can reproduce the EXACT SAME PERSON with 100% facial and appearance likeness.
+
+Provide a compact, high-fidelity English description (approx 50-80 words) strictly detailing:
+1. Perceived gender, approximate age, and heritage/ethnicity likeness.
+2. Face shape & facial bone structure (jawline, cheekbones, chin).
+3. Eyes (shape, eyelid type, iris color, eyebrows).
+4. Nose & Mouth (nose bridge, nostril width, lip fullness, expression).
+5. Skin tone and distinct facial traits (freckles, texture, marks if any).
+6. Hair (exact color, haircut/style, length, texture).
+
+Do NOT describe clothing, background, or lighting. Focus 100% on the person's face, head, and biological identity.
+Output ONLY the descriptive text, no preamble, no markdown fences, no bullet points.`,
+          },
+        ],
+      },
+    });
+
+    const text = response?.text?.trim();
+    if (text && text.length > 20) {
+      return text;
+    }
+  } catch (err: any) {
+    console.warn('Subject face extraction notice (non-fatal):', err?.message);
+  }
+  return null;
+}
 
 // Helper to map aspect ratios
 function mapAspectRatioToStandard(ratio: string): '1:1' | '16:9' | '9:16' | '4:3' | '3:4' {
@@ -1345,6 +1406,9 @@ app.post('/api/generate-image', aiLimiter, async (req, res) => {
       apiKey,
       apiEndpoint,
       model,
+      preserveStructure = true,
+      preserveFace = true,
+      controlNetWeight = 0.85,
     } = parsed.data;
 
     // Anthropic does not support image generation
@@ -1377,9 +1441,58 @@ app.post('/api/generate-image', aiLimiter, async (req, res) => {
       }
     }
 
+    // --- SUBJECT FACIAL & CHARACTER IDENTITY EXTRACTION ---
+    // Khi có ảnh gốc (sourceImageBase64) và bật preserveStructure/preserveFace:
+    // Tự động phân tích sinh trắc học và cấu trúc gương mặt của nhân vật gốc,
+    // khóa nhận diện để hình ảnh tạo ra KHÔNG bị sai lệch gương mặt hoặc biến dạng nhân vật.
+    let detectedSubjectProfile: string | null = null;
+    if (sourceImageBase64 && (preserveStructure || preserveFace)) {
+      const visionKey = (provider === 'gemini' ? effectiveKey : (process.env.GEMINI_API_KEY || effectiveKey));
+      if (visionKey) {
+        try {
+          detectedSubjectProfile = await extractSubjectFacialProfile({
+            imageBase64: sourceImageBase64,
+            apiKey: visionKey,
+          });
+        } catch (subErr: any) {
+          console.warn('Subject identity extraction skipped:', subErr?.message);
+        }
+      }
+    }
+
     const trimmedPrompt = prompt.trim();
-    const effectiveNegative = negativePrompt ? ` [Avoid: ${negativePrompt}]` : '';
-    const fullPrompt = `${trimmedPrompt}${effectiveNegative}`;
+    let finalPrompt = trimmedPrompt;
+
+    if (detectedSubjectProfile) {
+      const fidelityPct = Math.round(controlNetWeight * 100);
+      const faceLockPrefix =
+        `[CRITICAL SUBJECT IDENTITY & ${fidelityPct}% FACE PRESERVATION]: The primary subject MUST be the EXACT SAME CHARACTER from the reference portrait. ` +
+        `Biometric facial features & appearance: ${detectedSubjectProfile}. ` +
+        `Maintain 100% identical facial bone structure, jawline, eye shape, nose shape, lips, skin tone, hairstyle, and character identity with ZERO facial alteration or morphing. ` +
+        `Generate this exact person in the requested scene: `;
+      finalPrompt = `${faceLockPrefix}${trimmedPrompt}`;
+    }
+
+    const faceNegativeTokens = [
+      'different face',
+      'altered facial features',
+      'different person',
+      'deformed face',
+      'distorted facial structure',
+      'wrong face',
+      'morphing face',
+      'plastic skin',
+      'asymmetrical eyes',
+      'bad face anatomy',
+      'face swap artifacts',
+      'changed ethnic appearance',
+    ];
+
+    const effectiveNegative = negativePrompt
+      ? ` [Avoid: ${faceNegativeTokens.join(', ')}, ${negativePrompt}]`
+      : ` [Avoid: ${faceNegativeTokens.join(', ')}]`;
+
+    const fullPrompt = `${finalPrompt}${effectiveNegative}`;
     const mappedRatio = mapAspectRatioToStandard(aspectRatio);
     const count = Math.min(Math.max(Number(variations) || 1, 1), 4);
 
@@ -1443,6 +1556,7 @@ app.post('/api/generate-image', aiLimiter, async (req, res) => {
       images: generatedImages,
       aspectRatio: mappedRatio,
       count: generatedImages.length,
+      detectedSubjectProfile,
       createdAt: new Date().toISOString(),
     });
   } catch (error: any) {

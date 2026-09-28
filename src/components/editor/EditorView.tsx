@@ -111,6 +111,9 @@ export const EditorView: React.FC = () => {
         sourceFile,
         referenceImage,
         referenceFile,
+        preserveStructure: settings.preserveStructure,
+        preserveFace: settings.preserveFace ?? true,
+        controlNetWeight: settings.controlNetWeight,
         activeProfile: currentActiveProfile,
       });
 
@@ -224,6 +227,7 @@ export const EditorView: React.FC = () => {
         <OutputSettings
           settings={settings}
           onChange={setSettings}
+          hasSourceImage={Boolean(sourceImage)}
           onActiveProfileChange={handleActiveProfileChange}
         />
 

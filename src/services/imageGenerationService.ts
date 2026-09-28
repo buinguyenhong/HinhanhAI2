@@ -48,6 +48,9 @@ export interface GenerateImageParams {
   sourceFile: File | null;
   referenceImage: string | null;
   referenceFile: File | null;
+  preserveStructure?: boolean;
+  preserveFace?: boolean;
+  controlNetWeight?: number;
   activeProfile: ApiProfile;
 }
 
@@ -63,6 +66,9 @@ export async function generateImages(params: GenerateImageParams): Promise<Gener
     sourceFile,
     referenceImage,
     referenceFile,
+    preserveStructure = true,
+    preserveFace = true,
+    controlNetWeight = 0.85,
     activeProfile,
   } = params;
 
@@ -89,6 +95,9 @@ export async function generateImages(params: GenerateImageParams): Promise<Gener
         apiEndpoint: activeProfile.apiEndpoint || undefined,
         sourceImageBase64,
         referenceImageBase64,
+        preserveStructure,
+        preserveFace,
+        controlNetWeight,
       }),
     });
 
