@@ -24,7 +24,7 @@ AI Image Studio (tên gọi khác: **HinhanhAI**) là một công cụ chỉnh s
 - Lịch sử tự lưu vào `localStorage`.
 
 ### 3.2. Bảng điều khiển (Dashboard)
-- Hiện là **số liệu tĩnh/mock** (chưa nối dữ liệu thật): tổng ảnh, credits, render time, Drive sync, phân bổ model, activity logs.
+- **Đã nối trực tiếp với dữ liệu thật 100%** (loại bỏ hoàn toàn mock data): tổng ảnh đã lưu từ `localStorage`, thống kê theo ngày, Engine sinh ảnh & phân tích đang kích hoạt, trạng thái kết nối Google Drive, phân bổ tần suất sử dụng model AI thực tế, và nhật ký tác vụ trực tiếp (Live Activity Ledger).
 
 ### 3.3. Lịch sử (History)
 - Lưu `localStorage` (key `hinhanhai_history_v2`, tối đa 100 mục), dạng lưới, có lightbox, tải về, lưu Drive, xóa.

@@ -120,7 +120,11 @@ export const EditorView: React.FC = () => {
         setSelectedImageIndex(0); // Auto-select first variant
 
         // 1. Save directly into persistent History
-        saveGeneratedToHistory(generatedList, finalPrompt, currentActiveProfile.name);
+        saveGeneratedToHistory(
+          generatedList,
+          finalPrompt,
+          currentActiveProfile.renderModel || currentActiveProfile.name
+        );
 
         // 2. Auto-sync to Google Drive if configured
         if (currentConfig.autoSync && currentConfig.driveConnected) {
