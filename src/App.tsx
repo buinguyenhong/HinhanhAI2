@@ -12,7 +12,7 @@ import { EditorView } from './components/editor/EditorView';
 import { HistoryView } from './components/history/HistoryView';
 import { DashboardView } from './components/dashboard/DashboardView';
 import { SettingsView } from './components/settings/SettingsView';
-import { isUserAuthenticated, clearAuthToken } from './services/authService';
+import { isUserAuthenticated, clearAuthToken, AUTH_EXPIRED_EVENT } from './services/authService';
 import { performInitialSync } from './services/syncService';
 import { loadAppSettings } from './services/storageService';
 
@@ -22,11 +22,16 @@ function AppContent() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [activeTab, setActiveTab] = useState<ActiveTab>('editor');
 
-  // Check login state on mount
+  // Check login state on mount & listen for session expiration
   useEffect(() => {
     if (isUserAuthenticated()) {
       setIsAuthenticated(true);
     }
+    const onAuthExpired = () => {
+      setIsAuthenticated(false);
+    };
+    window.addEventListener(AUTH_EXPIRED_EVENT, onAuthExpired);
+    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, onAuthExpired);
   }, []);
 
   // Sau khi xác thực: đồng bộ cài đặt + lịch sử từ server về local (chỉ 1 lần mỗi phiên đăng nhập).

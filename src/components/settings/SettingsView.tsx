@@ -36,7 +36,7 @@ import {
   getAnalyzeProfile,
   getRenderProfile,
 } from '../../services/storageService';
-import { getAuthHeaders } from '../../services/authService';
+import { getAuthHeaders, handleAuthExpired } from '../../services/authService';
 import {
   authenticateWithGoogleDrive,
   disconnectGoogleDrive,
@@ -340,6 +340,17 @@ export const SettingsView: React.FC = () => {
           testType: 'connection',
         }),
       });
+      if (response.status === 401) {
+        setTestResults((prev) => ({
+          ...prev,
+          [profile.id]: {
+            status: 'error',
+            message: 'Phiên đăng nhập web đã hết hạn. Đang chuyển về màn hình đăng nhập...',
+          },
+        }));
+        setTimeout(() => handleAuthExpired(), 1500);
+        return;
+      }
       const data = await response.json();
       const failed = (data.checks || []).filter((c: any) => !c.ok);
       if (response.ok && data.success) {
@@ -412,6 +423,17 @@ export const SettingsView: React.FC = () => {
           testType: 'render',
         }),
       });
+      if (response.status === 401) {
+        setTestResults((prev) => ({
+          ...prev,
+          [profile.id]: {
+            status: 'error',
+            message: 'Phiên đăng nhập web đã hết hạn. Đang chuyển về màn hình đăng nhập...',
+          },
+        }));
+        setTimeout(() => handleAuthExpired(), 1500);
+        return;
+      }
       const data = await response.json().catch(() => ({}));
       if (response.ok && data.success) {
         setTestResults((prev) => ({
@@ -476,6 +498,14 @@ export const SettingsView: React.FC = () => {
         }),
       });
 
+      if (response.status === 401) {
+        setModalConnResult({
+          status: 'error',
+          message: 'Phiên đăng nhập web đã hết hạn. Đang chuyển về màn hình đăng nhập...',
+        });
+        setTimeout(() => handleAuthExpired(), 1500);
+        return;
+      }
       const data = await response.json().catch(() => ({}));
       if (response.ok && data.success) {
         setModalConnResult({
@@ -545,6 +575,14 @@ export const SettingsView: React.FC = () => {
         }),
       });
 
+      if (response.status === 401) {
+        setModalRenderResult({
+          status: 'error',
+          message: 'Phiên đăng nhập web đã hết hạn. Đang chuyển về màn hình đăng nhập...',
+        });
+        setTimeout(() => handleAuthExpired(), 1500);
+        return;
+      }
       const data = await response.json().catch(() => ({}));
       if (response.ok && data.success) {
         setModalRenderResult({

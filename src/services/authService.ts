@@ -18,6 +18,15 @@ export function setAuthToken(token: string): void {
   }
 }
 
+export const AUTH_EXPIRED_EVENT = 'hinhanhai_auth_expired';
+
+export function handleAuthExpired(): void {
+  clearAuthToken();
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
+  }
+}
+
 export function clearAuthToken(): void {
   try {
     localStorage.removeItem(TOKEN_STORAGE_KEY);
