@@ -1164,6 +1164,15 @@ function mapAspectRatioToStandard(ratio: string): '1:1' | '16:9' | '9:16' | '4:3
 
 // --- IMAGE GENERATION PROVIDERS ---
 
+// Nhận diện model có khả năng sinh/sửa ảnh (để quyết định có thể gửi ảnh gốc làm tham chiếu).
+// Không hard-code một model duy nhất — chấp nhận nhiều họ model ảnh phổ biến.
+const IMAGE_MODEL_PATTERN =
+  /(gpt-image|dall-e|imagen|nano-banana|banana|flux|stable-?diffusion|sd[-_]?\d|sdxl|seedream|seededit|qwen[-_ ]?image|ideogram|recraft|kolors|hidream|janus|grok[-_ ]?image|gemini[-_ ]?[\d.]+[^ ]*image|image[-_ ]?preview|photon)/i;
+
+function looksLikeImageModel(model: string): boolean {
+  return IMAGE_MODEL_PATTERN.test(model || '');
+}
+
 interface GenerateParams {
   prompt: string;
   negativePrompt?: string | null;
@@ -1644,18 +1653,14 @@ app.post('/api/generate-image', aiLimiter, async (req, res) => {
       }
     }
 
-    if (sourceImageBase64 && (preserveStructure || preserveFace) && provider === 'gemini' && !/imagen-3.*capability/i.test(effectiveModel) && !/gemini-(2\.5-flash-image|3-pro-image)/i.test(effectiveModel)) {
+    if (sourceImageBase64 && (preserveStructure || preserveFace) && !looksLikeImageModel(effectiveModel)) {
       return res.status(400).json({
         success: false,
-        error: `Model '${effectiveModel}' không được nhận diện là model hỗ trợ ảnh tham chiếu. Chọn Imagen 3 Capability hoặc model Gemini image-capable.`,
+        error: `Model '${effectiveModel}' không được nhận diện là model sinh/sửa ảnh nên không dùng được ảnh gốc làm tham chiếu. Hãy chọn model ảnh (ví dụ nano-banana-2-edit, gemini-3.1-flash-image-edit, gpt-image-2) hoặc tắt tham chiếu chủ thể.`,
       });
     }
-    if (sourceImageBase64 && (preserveStructure || preserveFace) && provider === 'openai' && !/gpt-image-2/i.test(effectiveModel)) {
-      return res.status(400).json({
-        success: false,
-        error: `Model '${effectiveModel}' chưa được cấu hình để nhận ảnh gốc làm image edit. Chọn model OpenAI-compatible có hỗ trợ image edits (ví dụ gpt-image) hoặc tắt khóa gương mặt.`,
-      });
-    }
+
+
 
     // --- SUBJECT FACIAL & CHARACTER IDENTITY EXTRACTION ---
     let detectedSubjectProfile: string | null = null;
