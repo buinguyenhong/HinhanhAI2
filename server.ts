@@ -8,6 +8,7 @@ import cookieParser from 'cookie-parser';
 import jwt from 'jsonwebtoken';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
+import profilesConfig from './config/profiles.json';
 
 dotenv.config();
 
@@ -41,6 +42,34 @@ function parseSessionTtlMs(ttl: string): number {
 }
 const SESSION_TTL = (process.env.SESSION_TTL || '30d').trim();
 const SESSION_TTL_MS = parseSessionTtlMs(SESSION_TTL);
+
+// --- MANAGED API PROFILES (config/profiles.json) ---
+// Provider/endpoint/model được định nghĩa trong repo; API key KHÔNG nằm trong file,
+// mà server resolve từ biến môi trường qua trường `keyEnv` của mỗi profile.
+interface ManagedProfileConfig {
+  id: string;
+  name?: string;
+  provider: 'gemini' | 'openai' | 'anthropic';
+  role?: 'render' | 'analyze' | 'both';
+  apiEndpoint?: string;
+  renderModel?: string;
+  analyzeModel?: string;
+  keyEnv?: string;
+}
+
+const MANAGED_PROFILES: ManagedProfileConfig[] = Array.isArray((profilesConfig as any)?.profiles)
+  ? ((profilesConfig as any).profiles as ManagedProfileConfig[]).filter(
+      (p) => p && typeof p.id === 'string' && p.id.trim()
+    )
+  : [];
+const MANAGED_PROFILE_MAP = new Map<string, ManagedProfileConfig>(
+  MANAGED_PROFILES.map((p) => [p.id, p])
+);
+
+function resolveManagedKey(profile: ManagedProfileConfig): string {
+  if (!profile.keyEnv) return '';
+  return (process.env[profile.keyEnv] || '').trim();
+}
 
 // (legacy) OPENAI_ALLOWED_DOMAINS — không còn dùng để chặn SSRF.
 // Người dùng tự chịu trách nhiệm chọn endpoint OpenAI-compatible tin cậy.
@@ -883,6 +912,7 @@ const analyzeStyleSchema = z.object({
   model: z.string().max(150).optional().nullable(),
   apiKey: z.string().max(500).optional().nullable(),
   apiEndpoint: z.string().max(500).optional().nullable(),
+  profileId: z.string().max(150).optional().nullable(),
 });
 
 const generateImageSchema = z.object({
@@ -901,6 +931,7 @@ const generateImageSchema = z.object({
   provider: z.enum(['gemini', 'openai', 'anthropic']).optional().default('gemini'),
   apiKey: z.string().max(500).optional().nullable(),
   apiEndpoint: z.string().max(500).optional().nullable(),
+  profileId: z.string().max(150).optional().nullable(),
   sourceImageBase64: z.string().optional().nullable(),
   referenceImageBase64: z.string().optional().nullable(),
   preserveStructure: z.boolean().optional().default(true),
@@ -934,21 +965,38 @@ app.post('/api/gemini/analyze-style', aiLimiter, async (req, res) => {
       });
     }
 
-    const { provider = 'gemini', imageBase64, mimeType = 'image/jpeg', userFocus, model, apiKey, apiEndpoint } = parsed.data;
+    const {
+      provider: rawProvider = 'gemini',
+      imageBase64,
+      mimeType = 'image/jpeg',
+      userFocus,
+      model: rawModel,
+      apiKey: rawApiKey,
+      apiEndpoint: rawApiEndpoint,
+      profileId,
+    } = parsed.data;
+
+    // Profile quản lý trong config/profiles.json → server tự resolve key từ env.
+    const managed = profileId ? MANAGED_PROFILE_MAP.get(profileId) : undefined;
+    const provider = managed ? managed.provider : rawProvider;
+    const apiEndpoint = managed ? (managed.apiEndpoint || rawApiEndpoint) : rawApiEndpoint;
+    const model = managed ? (managed.analyzeModel || rawModel) : rawModel;
 
     // Resolve effective key & model
     const effectiveModel = (model && model.trim()) ||
       (provider === 'gemini' ? 'gemini-3.7-flash' :
         provider === 'anthropic' ? 'claude-3-5-sonnet-latest' : 'gpt-4o');
 
-    let effectiveKey = (apiKey && apiKey.trim()) || '';
-    if (!effectiveKey) {
+    let effectiveKey = managed ? resolveManagedKey(managed) : ((rawApiKey && rawApiKey.trim()) || '');
+    if (!effectiveKey && !managed) {
       if (provider === 'gemini') effectiveKey = process.env.GEMINI_API_KEY || '';
     }
     if (!effectiveKey) {
       return res.status(200).json({
         fallback: true,
-        message: `Chưa cấu hình API Key cho provider '${provider}'. Sử dụng visual engine tích hợp.`,
+        message: managed
+          ? `Profile '${managed.name || managed.id}' chưa có API Key. Hãy set biến môi trường ${managed.keyEnv || '(keyEnv)'}. Sử dụng visual engine tích hợp.`
+          : `Chưa cấu hình API Key cho provider '${provider}'. Sử dụng visual engine tích hợp.`,
       });
     }
 
@@ -1447,14 +1495,21 @@ app.post('/api/generate-image', aiLimiter, async (req, res) => {
       seed = '-1',
       sourceImageBase64,
       referenceImageBase64,
-      provider = 'gemini',
-      apiKey,
-      apiEndpoint,
-      model,
+      provider: rawProvider = 'gemini',
+      apiKey: rawApiKey,
+      apiEndpoint: rawApiEndpoint,
+      model: rawModel,
+      profileId,
       preserveStructure = true,
       preserveFace = true,
       controlNetWeight = 0.85,
     } = parsed.data;
+
+    // Profile quản lý trong config/profiles.json → server tự resolve key từ env.
+    const managed = profileId ? MANAGED_PROFILE_MAP.get(profileId) : undefined;
+    const provider = managed ? managed.provider : rawProvider;
+    const apiEndpoint = managed ? (managed.apiEndpoint || rawApiEndpoint) : rawApiEndpoint;
+    const model = managed ? (managed.renderModel || rawModel) : rawModel;
 
     // Anthropic does not support image generation
     if (provider === 'anthropic') {
@@ -1467,13 +1522,15 @@ app.post('/api/generate-image', aiLimiter, async (req, res) => {
     // Resolve effective key & model
     const effectiveModel = (model && model.trim()) ||
       (provider === 'gemini' ? 'imagen-3.0-generate-002' : 'gpt-image-1');
-    let effectiveKey = (apiKey && apiKey.trim()) || '';
-    if (!effectiveKey) {
+    let effectiveKey = managed ? resolveManagedKey(managed) : ((rawApiKey && rawApiKey.trim()) || '');
+    if (!effectiveKey && !managed) {
       if (provider === 'gemini') effectiveKey = process.env.GEMINI_API_KEY || '';
     }
     if (!effectiveKey) {
       return res.status(400).json({
-        error: `Chưa cấu hình API Key cho provider '${provider}'. Vui lòng thêm key trong Settings.`,
+        error: managed
+          ? `Profile '${managed.name || managed.id}' chưa có API Key. Hãy set biến môi trường ${managed.keyEnv || '(keyEnv)'}.`
+          : `Chưa cấu hình API Key cho provider '${provider}'. Vui lòng thêm key trong Settings.`,
         success: false,
       });
     }
@@ -1631,12 +1688,32 @@ app.post('/api/test-profile', apiLimiter, async (req, res) => {
       analyzeModel: z.string().max(150).optional().nullable(),
       role: z.enum(['render', 'analyze', 'both']).optional().default('both'),
       testType: z.enum(['connection', 'render', 'both']).optional().default('connection'),
+      profileId: z.string().max(150).optional().nullable(),
     });
     const parsed = schema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ error: 'Dữ liệu không hợp lệ', success: false });
     }
-    const { provider, apiKey, apiEndpoint, model, renderModel, analyzeModel, role, testType } = parsed.data;
+    let { provider, apiKey, apiEndpoint, model, renderModel, analyzeModel, role, testType } = parsed.data;
+    const { profileId } = parsed.data;
+
+    // Profile quản lý trong config/profiles.json → override bằng config + key từ env.
+    const managed = profileId ? MANAGED_PROFILE_MAP.get(profileId) : undefined;
+    if (managed) {
+      const key = resolveManagedKey(managed);
+      if (!key) {
+        return res.status(400).json({
+          success: false,
+          error: `Profile '${managed.name || managed.id}' chưa có API Key. Hãy set biến môi trường ${managed.keyEnv || '(keyEnv)'}.`,
+        });
+      }
+      provider = managed.provider;
+      apiKey = key;
+      apiEndpoint = managed.apiEndpoint || apiEndpoint;
+      renderModel = managed.renderModel || renderModel;
+      analyzeModel = managed.analyzeModel || analyzeModel;
+      role = managed.role || role;
+    }
     const start = Date.now();
 
     // ----------------------------------------------------

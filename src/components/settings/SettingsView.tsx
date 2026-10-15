@@ -322,7 +322,7 @@ export const SettingsView: React.FC = () => {
       return next;
     });
 
-    const hasKey = Boolean(profile.apiKey.trim()) || profile.provider === 'gemini';
+    const hasKey = Boolean(profile.apiKey.trim()) || profile.provider === 'gemini' || Boolean(profile.managed);
     if (!hasKey) {
       setTestingProfileId(null);
       setTestResults((prev) => ({
@@ -349,6 +349,7 @@ export const SettingsView: React.FC = () => {
           analyzeModel: profile.analyzeModel || undefined,
           renderModel: profile.renderModel || undefined,
           role: profile.role,
+          profileId: profile.id,
           testType: 'connection',
         }),
       });
@@ -406,7 +407,7 @@ export const SettingsView: React.FC = () => {
       return next;
     });
 
-    const hasKey = Boolean(profile.apiKey.trim()) || profile.provider === 'gemini';
+    const hasKey = Boolean(profile.apiKey.trim()) || profile.provider === 'gemini' || Boolean(profile.managed);
     if (!hasKey) {
       setTestingRenderProfileId(null);
       setTestResults((prev) => ({
@@ -432,6 +433,7 @@ export const SettingsView: React.FC = () => {
           apiEndpoint: profile.apiEndpoint || undefined,
           renderModel: profile.renderModel || undefined,
           role: profile.role,
+          profileId: profile.id,
           testType: 'render',
         }),
       });
@@ -843,6 +845,7 @@ export const SettingsView: React.FC = () => {
               const testResult = testResults[profile.id];
               const isTesting = testingProfileId === profile.id;
               const isAnthropic = profile.provider === 'anthropic';
+              const isManaged = Boolean(profile.managed);
 
               return (
                 <div
@@ -884,6 +887,14 @@ export const SettingsView: React.FC = () => {
                             <Eye size={9} /> ANALYZE
                           </span>
                         )}
+                        {isManaged && (
+                          <span
+                            className="text-[9px] font-mono uppercase px-2 py-0.5 border border-[#3B82F6]/40 bg-[#3B82F6]/10 text-[#1D4ED8] dark:text-[#93C5FD] font-semibold flex items-center gap-1"
+                            title="Cấu hình trong config/profiles.json (commit vào repo). API key lấy từ biến môi trường server."
+                          >
+                            <Server size={9} /> CONFIG
+                          </span>
+                        )}
                       </div>
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[10px] font-mono text-[#9C988F] dark:text-[#5E5D57] pt-1">
@@ -916,6 +927,8 @@ export const SettingsView: React.FC = () => {
                         <span>
                           {profile.apiKey
                             ? `••••••••••••${profile.apiKey.slice(-4)}`
+                            : isManaged
+                            ? `Biến môi trường: ${profile.keyEnv || '(chưa đặt keyEnv)'}`
                             : profile.provider === 'gemini'
                             ? 'Auto GEMINI_API_KEY (server env)'
                             : 'Chưa cấu hình khóa'}
@@ -986,8 +999,9 @@ export const SettingsView: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => handleOpenEditModal(profile)}
-                        title="Chỉnh sửa cấu hình"
-                        className="p-1.5 border border-[#E2DDD5] dark:border-[#292925] text-[#6E6B64] dark:text-[#8C8B84] hover:text-[#1C1B18] dark:hover:text-[#E8E7E2] hover:border-[#CCC7BE] transition-colors cursor-pointer"
+                        disabled={isManaged}
+                        title={isManaged ? 'Profile này cấu hình trong config/profiles.json (commit vào repo)' : 'Chỉnh sửa cấu hình'}
+                        className="p-1.5 border border-[#E2DDD5] dark:border-[#292925] text-[#6E6B64] dark:text-[#8C8B84] hover:text-[#1C1B18] dark:hover:text-[#E8E7E2] hover:border-[#CCC7BE] transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
                       >
                         <Edit2 size={13} />
                       </button>

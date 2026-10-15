@@ -1,4 +1,5 @@
 import { SETTINGS_SAVED_EVENT } from './syncEvents';
+import profilesConfig from '../../config/profiles.json';
 
 export type ApiProviderType = 'gemini' | 'openai' | 'anthropic';
 export type ApiProfileRole = 'render' | 'analyze' | 'both';
@@ -15,6 +16,9 @@ export interface ApiProfile {
   notes?: string;
   isCustom?: boolean;
   createdAt: string;
+  // Profile định nghĩa trong config/profiles.json (commit vào repo). Key lấy từ env server-side.
+  managed?: boolean;
+  keyEnv?: string;
 }
 
 export interface AppSettings {
@@ -43,7 +47,8 @@ export interface AppSettings {
 
 const STORAGE_KEY = 'hinhanhai_app_settings_v4';
 
-export const DEFAULT_PROFILES: ApiProfile[] = [
+// Fallback khi config/profiles.json rỗng để app luôn có ít nhất 1 profile.
+const FALLBACK_PROFILES: ApiProfile[] = [
   {
     id: 'gemini-default',
     name: 'Google Gemini (Mặc định)',
@@ -56,8 +61,55 @@ export const DEFAULT_PROFILES: ApiProfile[] = [
     notes: 'Dùng cho cả sinh ảnh (Imagen) và phân tích ảnh mẫu (Gemini Vision)',
     isCustom: false,
     createdAt: '2026-01-01',
+    managed: true,
+    keyEnv: 'GEMINI_API_KEY',
   },
 ];
+
+// Profile quản lý tập trung: đọc từ config/profiles.json (commit vào repo).
+// Không chứa apiKey — server tự resolve key từ biến môi trường qua trường `keyEnv`.
+export const MANAGED_PROFILES: ApiProfile[] = (() => {
+  const raw = (profilesConfig as any)?.profiles;
+  if (!Array.isArray(raw) || raw.length === 0) return FALLBACK_PROFILES;
+  return raw
+    .filter((p: any) => p && typeof p.id === 'string' && p.id.trim())
+    .map((p: any): ApiProfile => {
+      const provider: ApiProviderType =
+        p.provider === 'gemini' || p.provider === 'openai' || p.provider === 'anthropic'
+          ? p.provider
+          : 'openai';
+      const role: ApiProfileRole =
+        p.role === 'render' || p.role === 'analyze' || p.role === 'both' ? p.role : 'both';
+      return {
+        id: p.id,
+        name: typeof p.name === 'string' && p.name.trim() ? p.name : p.id,
+        provider,
+        role,
+        apiKey: '',
+        apiEndpoint: typeof p.apiEndpoint === 'string' ? p.apiEndpoint : '',
+        renderModel: typeof p.renderModel === 'string' ? p.renderModel : '',
+        analyzeModel: typeof p.analyzeModel === 'string' ? p.analyzeModel : '',
+        notes: typeof p.notes === 'string' ? p.notes : '',
+        isCustom: false,
+        createdAt: 'config',
+        managed: true,
+        keyEnv: typeof p.keyEnv === 'string' ? p.keyEnv : '',
+      };
+    });
+})();
+
+const MANAGED_PROFILE_IDS = new Set(MANAGED_PROFILES.map((p) => p.id));
+
+export const DEFAULT_PROFILES: ApiProfile[] =
+  MANAGED_PROFILES.length > 0 ? MANAGED_PROFILES : FALLBACK_PROFILES;
+
+// Ghép profile quản lý (config) với profile người dùng tự thêm (localStorage).
+// Managed luôn thắng theo id → cấu hình provider trong repo không bị mất/ghi đè.
+export function mergeProfiles(stored: ApiProfile[]): ApiProfile[] {
+  const custom = stored.filter((p) => !MANAGED_PROFILE_IDS.has(p.id));
+  const merged = [...MANAGED_PROFILES, ...custom];
+  return merged.length > 0 ? merged : DEFAULT_PROFILES;
+}
 
 export const DEFAULT_SETTINGS: AppSettings = {
   theme: 'dark',
@@ -127,10 +179,10 @@ export const loadAppSettings = (): AppSettings => {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      const profiles = (Array.isArray(parsed.apiProfiles) ? parsed.apiProfiles : [])
+      const storedProfiles = (Array.isArray(parsed.apiProfiles) ? parsed.apiProfiles : [])
         .map(normalizeProfile)
         .filter((p: ApiProfile) => p.provider !== 'anthropic' || p.role !== 'render');
-      const effectiveProfiles = profiles.length > 0 ? profiles : DEFAULT_PROFILES;
+      const effectiveProfiles = mergeProfiles(storedProfiles);
 
       const renderExists = effectiveProfiles.some(
         (p: ApiProfile) => p.id === parsed.renderProfileId && p.role !== 'analyze'
@@ -166,7 +218,12 @@ export const saveAppSettings = (settings: AppSettings): void => {
 // Ghi thuần vào localStorage — không phát event (dùng khi sync kéo dữ liệu về).
 export const writeSettingsLocally = (settings: AppSettings): void => {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+    // Không lưu profile managed vào localStorage — chúng được nạp lại từ config/profiles.json.
+    const persisted: AppSettings = {
+      ...settings,
+      apiProfiles: settings.apiProfiles.filter((p) => !p.managed),
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(persisted));
   } catch (err) {
     console.error('Failed to save settings to localStorage', err);
   }

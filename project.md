@@ -68,9 +68,10 @@ AI Image Studio (tên gọi khác: **HinhanhAI**) là một công cụ chỉnh s
 
 ## 5. Cấu hình / Biến môi trường
 Xem `.env.example`:
-- `GEMINI_API_KEY` — key Gemini (AI Studio có thể tự inject khi deploy lên AI Studio/Vercel).
+- `GEMINI_API_KEY` — key Gemini (keyEnv của profile `gemini-default`).
 - `APP_PASSWORD` — mật khẩu đăng nhập (mặc định local: `admin`; production bắt buộc set).
 - `JWT_SECRET` — khóa ký JWT (production bắt buộc set; local có giá trị dev).
+- `SESSION_TTL` — thời hạn phiên đăng nhập (mặc định `30d`; nhận `s`/`m`/`h`/`d`).
 - `OPENAI_ALLOWED_DOMAINS` — **legacy/không còn dùng**. Endpoint [OI]-compatible hiện tự do (chỉ check URL hợp lệ). Người dùng tự chịu trách nhiệm chọn endpoint tin cậy.
 - `ANALYZE_NORMALIZER_ENABLED` — bật/tắt server-side LLM normalizer (mặc định `true`). Khi provider trả JSON sai schema, server gọi Gemini flash-lite map về schema chuẩn.
 - `ANALYZE_TIMEOUT_MS` — timeout cho analyze (mặc định `60000`).
@@ -95,6 +96,32 @@ Xem `.env.example`:
 | `gemini` | ✅ | ✅ | Dùng SDK + key. Không cần endpoint custom. |
 | `openai` ([OI]-compatible) | ✅ | ✅ | Thử `/images/generations`, `/images`, `/v1/images/generations`. |
 | `anthropic` | ❌ | ✅ | UI chặn role render; server trả 400 nếu cố. |
+
+### 5.3. Provider config trong repo (`config/profiles.json`)
+- Danh sách provider được định nghĩa trong **`config/profiles.json`** (commit vào repo) — KHÔNG chứa API key.
+- Mỗi profile có trường **`keyEnv`** = tên biến môi trường chứa key. Server resolve key từ env khi profile được chọn.
+- Cả client (Vite bundle) lẫn server (esbuild bundle) đọc cùng file này lúc build.
+- Profile trong config là **managed**: luôn xuất hiện, ghi đè theo `id`, không sửa/xóa được trong UI (badge `CONFIG`). Profile do người dùng tự thêm vẫn lưu ở `localStorage` và được ghép thêm.
+- Client gửi `profileId` lên server; nếu là profile managed, server bỏ qua key client gửi và tự lấy từ env (`keyEnv`).
+- Khi thêm provider mới: sửa `config/profiles.json`, thêm biến env tương ứng trên Render, push.
+
+Ví dụ:
+```json
+{
+  "profiles": [
+    {
+      "id": "1endpoint",
+      "name": "1endpoint.dev",
+      "provider": "openai",
+      "role": "both",
+      "apiEndpoint": "https://1endpoint.dev/api/v1",
+      "renderModel": "gpt-image-2",
+      "analyzeModel": "gpt-4o",
+      "keyEnv": "ONEENDPOINT_API_KEY"
+    }
+  ]
+}
+```
 
 ## 6. Các endpoint chính (server.ts)
 - `GET /api/health` — public.

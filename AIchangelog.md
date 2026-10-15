@@ -8,7 +8,8 @@
 
 | # | Commit | Tóm tắt |
 |---|---|---|
-| 15 | `HEAD` | **fix(auth): session dài hạn + tự phát hiện hết hạn, tự sync lại khi quay lại tab** — client tự decode `exp` JWT (`isTokenExpired`) để `isUserAuthenticated()` không còn "zombie session"; thêm `authFetch()` gắn Bearer + bắt 401 tập trung → tự đưa về màn hình Login (áp dụng cho sync, generate, analyze); `App.tsx` tự `performInitialSync()` khi tab/cửa sổ active trở lại; server `SESSION_TTL` (mặc định 30d thay cho 12h); xóa `firebase-applet-config.json` (dead code). |
+| 16 | `HEAD` | **feat(config): provider profiles lưu trong repo, API key qua env** — thêm `config/profiles.json` (không chứa key) làm nguồn cấu hình provider; cả client (Vite) lẫn server (esbuild) đọc chung file; mỗi profile có `keyEnv` trỏ tên biến môi trường; server resolve key từ env theo `profileId`, bỏ qua key client gửi; profile managed luôn hiện + không sửa/xóa trong UI (badge CONFIG); profile người dùng tự thêm vẫn lưu localStorage và được ghép thêm. |
+| 15 | `b279dd1` | **fix(auth): session dài hạn + tự phát hiện hết hạn, tự sync lại khi quay lại tab** — client tự decode `exp` JWT (`isTokenExpired`) để `isUserAuthenticated()` không còn "zombie session"; thêm `authFetch()` gắn Bearer + bắt 401 tập trung → tự đưa về màn hình Login (áp dụng cho sync, generate, analyze); `App.tsx` tự `performInitialSync()` khi tab/cửa sổ active trở lại; server `SESSION_TTL` (mặc định 30d thay cho 12h); xóa `firebase-applet-config.json` (dead code). |
 | 14 | `a6ab8fa` | **feat: real live dashboard metrics & activity ledger, drop static mock data** — kết nối DashboardView trực tiếp với getSavedHistory() và loadAppSettings(); xóa bỏ hoàn toàn số liệu mock 1,428 ảnh / credits / fake logs; đo lường phân bổ model AI thực tế và phản ứng thời gian thực qua sync events; lưu tên model chính xác vào history. |
 | 13 | `477c1d5` | **feat: role-based dynamic inputs, smart OpenAI candidate paths & test probe hardening** — chỉ hiện textbox model tương ứng theo vai trò (render/analyze/both); tự động nhận diện candidate paths /api/v1 cho 1endpoint.dev & OpenAI proxies; bỏ tham số quality cho model không phải dall-e-3; sửa test probe cho role render qua /models. |
 | 12 | `477c3ca` | **feat: dual test buttons in modal, Imagen SDK support & API logic hardening** — nút Test kết nối + Test model sinh ảnh với preview thumbnail & lightbox; hỗ trợ generateImages cho Imagen 3; parse JSON an toàn cho OpenAI markdown; nâng rate limit AI lên 120; chuẩn hóa OpenAI proxy paths. |
@@ -105,6 +106,8 @@
 | `GEMINI_API_KEY` | — | Gemini SDK key. |
 | `APP_PASSWORD` | `admin` (dev) | Mật khẩu login. Production bắt buộc. |
 | `JWT_SECRET` | dev value | Ký JWT. Production bắt buộc. |
+| `SESSION_TTL` | `30d` | Thời hạn phiên (s/m/h/d). |
+| `<PROFILE>.keyEnv` | — | Key của từng provider managed (vd `GEMINI_API_KEY`), khai báo trong `config/profiles.json`. |
 | `OPENAI_ALLOWED_DOMAINS` | (none — legacy, không dùng) | Đã bỏ SSRF guard. |
 | `ANALYZE_NORMALIZER_ENABLED` | `true` | Bật/tắt server-side LLM normalizer. |
 | `ANALYZE_TIMEOUT_MS` | 60000 | Timeout analyze. |

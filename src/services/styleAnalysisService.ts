@@ -560,6 +560,7 @@ export async function analyzeImageStyle(
       body.model = analyzeProfile.analyzeModel;
       body.apiKey = analyzeProfile.apiKey || undefined;
       body.apiEndpoint = analyzeProfile.apiEndpoint || undefined;
+      body.profileId = analyzeProfile.id;
     }
 
     // Call server endpoint (multi-provider aware)

@@ -92,6 +92,7 @@ export async function generateImages(params: GenerateImageParams): Promise<Gener
         provider: activeProfile.provider,
         apiKey: activeProfile.apiKey || undefined,
         apiEndpoint: activeProfile.apiEndpoint || undefined,
+        profileId: activeProfile.id,
         sourceImageBase64,
         referenceImageBase64,
         preserveStructure,
