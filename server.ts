@@ -1381,19 +1381,22 @@ async function singleCallOpenAI(
         form.append('prompt', String(reqBody.prompt || ''));
         if (reqBody.size) form.append('size', String(reqBody.size));
         if (reqBody.quality) form.append('quality', String(reqBody.quality));
-        if (referenceImageBase64) {
-          const referenceData = referenceImageBase64.match(/^data:([^;]+);base64,(.+)$/);
-          if (!referenceData) throw new Error('Ảnh mẫu không phải data URL base64 hợp lệ.');
-          const referenceBuffer = Buffer.from(referenceData[2], 'base64');
-          const referenceExt = referenceData[1].split('/')[1]?.replace(/[^a-zA-Z0-9]/g, '') || 'png';
-          form.append(sourceImageBase64 ? 'image[]' : 'image', new Blob([referenceBuffer], { type: referenceData[1] }), `reference.${referenceExt}`);
-        }
+        // [OI] yêu cầu dùng nhất quán MỘT tên field: `image` (1 ảnh) hoặc `image[]` (nhiều ảnh).
+        // Ảnh gốc (chủ thể) đứng trước, ảnh mẫu (style) đứng sau.
+        const imageField = sourceImageBase64 && referenceImageBase64 ? 'image[]' : 'image';
         if (sourceImageBase64) {
           const imageData = sourceImageBase64.match(/^data:([^;]+);base64,(.+)$/);
           if (!imageData) throw new Error('Ảnh gốc không phải data URL base64 hợp lệ.');
           const imageBuffer = Buffer.from(imageData[2], 'base64');
           const extension = imageData[1].split('/')[1]?.replace(/[^a-zA-Z0-9]/g, '') || 'png';
-          form.append('image', new Blob([imageBuffer], { type: imageData[1] }), `source.${extension}`);
+          form.append(imageField, new Blob([imageBuffer], { type: imageData[1] }), `source.${extension}`);
+        }
+        if (referenceImageBase64) {
+          const referenceData = referenceImageBase64.match(/^data:([^;]+);base64,(.+)$/);
+          if (!referenceData) throw new Error('Ảnh mẫu không phải data URL base64 hợp lệ.');
+          const referenceBuffer = Buffer.from(referenceData[2], 'base64');
+          const referenceExt = referenceData[1].split('/')[1]?.replace(/[^a-zA-Z0-9]/g, '') || 'png';
+          form.append(imageField, new Blob([referenceBuffer], { type: referenceData[1] }), `reference.${referenceExt}`);
         }
         requestBody = form;
       } else {
