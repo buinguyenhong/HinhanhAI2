@@ -10,6 +10,17 @@
       "analyzeModel": "gemini-3.7-flash",
       "notes": "Sinh ảnh (Imagen) + phân tích ảnh mẫu (Gemini Vision). Key lấy từ env GEMINI_API_KEY.",
       "keyEnv": "GEMINI_API_KEY"
+    },
+    {
+      "id": "1endpoint",
+      "name": "1endpoint.dev",
+      "provider": "openai",
+      "role": "both",
+      "apiEndpoint": "https://1endpoint.dev/api/v1",
+      "renderModel": "gpt-image-2",
+      "analyzeModel": "gpt-4o",
+      "notes": "Proxy [OI]-compatible. Key lấy từ env ONEENDPOINT_API_KEY.",
+      "keyEnv": "ONEENDPOINT_API_KEY"
     }
   ]
 }

@@ -96,6 +96,9 @@ export const SettingsView: React.FC = () => {
 
   const [testingProfileId, setTestingProfileId] = useState<string | null>(null);
   const [testingRenderProfileId, setTestingRenderProfileId] = useState<string | null>(null);
+  const [loadingModelsFor, setLoadingModelsFor] = useState<string | null>(null);
+  const [profileModels, setProfileModels] = useState<Record<string, string[]>>({});
+  const [profileModelsError, setProfileModelsError] = useState<Record<string, string>>({});
   const [testResults, setTestResults] = useState<
     Record<string, { status: 'success' | 'error'; message: string; latency?: number; imageUrl?: string }>
   >({});
@@ -130,6 +133,11 @@ export const SettingsView: React.FC = () => {
   const [formRenderModel, setFormRenderModel] = useState('');
   const [formAnalyzeModel, setFormAnalyzeModel] = useState('');
   const [formNotes, setFormNotes] = useState('');
+
+  // Danh sách model tự động lấy từ provider (autocomplete cho Render/Analyze Model)
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [isLoadingModels, setIsLoadingModels] = useState(false);
+  const [modelsError, setModelsError] = useState<string | null>(null);
 
   useEffect(() => {
     setSettings((prev) => ({ ...prev, theme }));
@@ -172,6 +180,104 @@ export const SettingsView: React.FC = () => {
     setModalConnResult(null);
     setModalRenderResult(null);
     setPreviewTestImage(null);
+    setAvailableModels([]);
+    setModelsError(null);
+  };
+
+  const handleFetchModels = async () => {
+    if (formProvider !== 'gemini' && !formApiKey.trim()) {
+      setModelsError('Nhập API Key trước khi tải danh sách model.');
+      return;
+    }
+    setIsLoadingModels(true);
+    setModelsError(null);
+    try {
+      const response = await fetch('/api/list-models', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify({
+          provider: formProvider,
+          apiKey: formApiKey.trim() || undefined,
+          apiEndpoint: formEndpoint.trim() || undefined,
+        }),
+      });
+      if (response.status === 401) {
+        setModelsError('Phiên đăng nhập web đã hết hạn. Đang chuyển về màn hình đăng nhập...');
+        setTimeout(() => handleAuthExpired(), 1500);
+        return;
+      }
+      const data = await response.json().catch(() => ({}));
+      if (response.ok && data.success) {
+        const list: string[] = Array.isArray(data.models) ? data.models : [];
+        setAvailableModels(list);
+        if (list.length === 0) setModelsError('Provider không trả về model nào.');
+      } else {
+        setModelsError(data.error || 'Không lấy được danh sách model.');
+      }
+    } catch (err: any) {
+      setModelsError(`Lỗi mạng khi tải model: ${err?.message || err}`);
+    } finally {
+      setIsLoadingModels(false);
+    }
+  };
+
+  const handleFetchProfileModels = async (profile: ApiProfile) => {
+    setLoadingModelsFor(profile.id);
+    setProfileModels((prev) => {
+      const next = { ...prev };
+      delete next[profile.id];
+      return next;
+    });
+    setProfileModelsError((prev) => {
+      const next = { ...prev };
+      delete next[profile.id];
+      return next;
+    });
+
+    const hasKey = Boolean(profile.apiKey.trim()) || profile.provider === 'gemini' || Boolean(profile.managed);
+    if (!hasKey) {
+      setLoadingModelsFor(null);
+      setProfileModelsError((prev) => ({ ...prev, [profile.id]: 'Thiếu API Key.' }));
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/list-models', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify({
+          provider: profile.provider,
+          apiKey: profile.apiKey || undefined,
+          apiEndpoint: profile.apiEndpoint || undefined,
+          profileId: profile.id,
+        }),
+      });
+      if (response.status === 401) {
+        setProfileModelsError((prev) => ({ ...prev, [profile.id]: 'Phiên đăng nhập đã hết hạn.' }));
+        setTimeout(() => handleAuthExpired(), 1500);
+        return;
+      }
+      const data = await response.json().catch(() => ({}));
+      if (response.ok && data.success) {
+        const list: string[] = Array.isArray(data.models) ? data.models : [];
+        setProfileModels((prev) => ({ ...prev, [profile.id]: list }));
+        if (list.length === 0) {
+          setProfileModelsError((prev) => ({ ...prev, [profile.id]: 'Provider không trả về model nào.' }));
+        }
+      } else {
+        setProfileModelsError((prev) => ({ ...prev, [profile.id]: data.error || 'Không lấy được model.' }));
+      }
+    } catch (err: any) {
+      setProfileModelsError((prev) => ({ ...prev, [profile.id]: `Lỗi mạng: ${err?.message || err}` }));
+    } finally {
+      setLoadingModelsFor(null);
+    }
   };
 
   const handleOpenAddModal = () => {
@@ -193,6 +299,8 @@ export const SettingsView: React.FC = () => {
     setModalConnResult(null);
     setModalRenderResult(null);
     setPreviewTestImage(null);
+    setAvailableModels([]);
+    setModelsError(null);
     setIsProfileModalOpen(true);
   };
 
@@ -972,6 +1080,16 @@ export const SettingsView: React.FC = () => {
                         </button>
                       )}
 
+                      <button
+                        type="button"
+                        onClick={() => handleFetchProfileModels(profile)}
+                        disabled={loadingModelsFor === profile.id}
+                        title="Lấy danh sách model từ provider"
+                        className="p-1.5 border border-[#E2DDD5] dark:border-[#292925] text-[#6E6B64] dark:text-[#8C8B84] hover:text-[#1C1B18] dark:hover:text-[#E8E7E2] hover:border-[#CCC7BE] transition-colors cursor-pointer disabled:opacity-50"
+                      >
+                        <RefreshCw size={13} className={loadingModelsFor === profile.id ? 'animate-spin' : ''} />
+                      </button>
+
                       {/* Nút Test kết nối (Ping / Auth) */}
                       <button
                         type="button"
@@ -1018,6 +1136,58 @@ export const SettingsView: React.FC = () => {
                       )}
                     </div>
                   </div>
+
+                      {(profileModels[profile.id] || profileModelsError[profile.id]) && (
+                    <div className="mt-3 text-[10px] font-mono px-3 py-2 border border-[#3B82F6]/30 bg-[#3B82F6]/5 text-[#1D4ED8] dark:text-[#93C5FD]">
+                      {profileModelsError[profile.id] ? (
+                        <span>{profileModelsError[profile.id]}</span>
+                      ) : (
+                        <div className="space-y-1">
+                          <span>{profileModels[profile.id].length} model(s):</span>
+                          <div className="flex flex-wrap gap-1.5">
+                            {profileModels[profile.id].map((modelName) => (
+                              <span key={modelName} className="inline-flex border border-[#3B82F6]/30">
+                                {profile.role !== 'analyze' && profile.provider !== 'anthropic' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const nextProfiles = settings.apiProfiles.map((p) =>
+                                        p.id === profile.id ? { ...p, renderModel: modelName } : p
+                                      );
+                                      const next = { ...settings, apiProfiles: nextProfiles };
+                                      setSettings(next);
+                                      saveAppSettings(next);
+                                    }}
+                                    className="px-1.5 py-0.5 hover:bg-[#3B82F6]/10 cursor-pointer border-r border-[#3B82F6]/30"
+                                    title="Dùng model này cho render"
+                                  >
+                                    R · {modelName}
+                                  </button>
+                                )}
+                                {profile.role !== 'render' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const nextProfiles = settings.apiProfiles.map((p) =>
+                                        p.id === profile.id ? { ...p, analyzeModel: modelName } : p
+                                      );
+                                      const next = { ...settings, apiProfiles: nextProfiles };
+                                      setSettings(next);
+                                      saveAppSettings(next);
+                                    }}
+                                    className="px-1.5 py-0.5 hover:bg-[#3B82F6]/10 cursor-pointer"
+                                    title="Dùng model này cho phân tích"
+                                  >
+                                    A · {modelName}
+                                  </button>
+                                )}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {testResult && (
                     <div
@@ -1487,6 +1657,37 @@ export const SettingsView: React.FC = () => {
                 />
               </div>
 
+              {/* Tự động lấy danh sách model từ provider để gợi ý (autocomplete) */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] uppercase tracking-wider text-[#6E6B64] dark:text-[#8C8B84] font-medium">
+                    Danh sách Model của provider
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleFetchModels}
+                    disabled={isLoadingModels}
+                    className="text-[10px] font-mono uppercase px-2.5 py-1 border border-[#E2DDD5] dark:border-[#292925] text-[#6E6B64] dark:text-[#8C8B84] hover:text-[#1C1B18] dark:hover:text-[#E8E7E2] hover:border-[#CCC7BE] transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    <RefreshCw size={11} className={isLoadingModels ? 'animate-spin' : ''} />
+                    {isLoadingModels ? 'Đang tải...' : 'Tải danh sách model'}
+                  </button>
+                </div>
+                {availableModels.length > 0 && (
+                  <p className="text-[10px] font-mono text-[#15803D] dark:text-[#4ADE80]">
+                    ✓ Đã tải {availableModels.length} model — gõ vào ô bên dưới để chọn nhanh.
+                  </p>
+                )}
+                {modelsError && (
+                  <p className="text-[10px] font-mono text-[#B91C1C] dark:text-[#F87171]">{modelsError}</p>
+                )}
+                <datalist id="provider-model-options">
+                  {availableModels.map((m) => (
+                    <option key={m} value={m} />
+                  ))}
+                </datalist>
+              </div>
+
               {/* Model Sinh ảnh (Render Model): chỉ hiện khi role là 'render' hoặc 'both' và không phải Anthropic */}
               {formProvider !== 'anthropic' && formRole !== 'analyze' && (
                 <div className="space-y-1.5">
@@ -1499,6 +1700,7 @@ export const SettingsView: React.FC = () => {
                   <input
                     type="text"
                     required
+                    list="provider-model-options"
                     value={formRenderModel}
                     onChange={(e) => setFormRenderModel(e.target.value)}
                     placeholder={PROVIDER_PRESETS[formProvider].renderModel}
@@ -1524,6 +1726,7 @@ export const SettingsView: React.FC = () => {
                   <input
                     type="text"
                     required
+                    list="provider-model-options"
                     value={formAnalyzeModel}
                     onChange={(e) => setFormAnalyzeModel(e.target.value)}
                     placeholder={PROVIDER_PRESETS[formProvider].analyzeModel}

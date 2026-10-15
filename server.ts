@@ -980,7 +980,7 @@ app.post('/api/gemini/analyze-style', aiLimiter, async (req, res) => {
     const managed = profileId ? MANAGED_PROFILE_MAP.get(profileId) : undefined;
     const provider = managed ? managed.provider : rawProvider;
     const apiEndpoint = managed ? (managed.apiEndpoint || rawApiEndpoint) : rawApiEndpoint;
-    const model = managed ? (managed.analyzeModel || rawModel) : rawModel;
+    const model = managed ? (rawModel || managed.analyzeModel) : rawModel;
 
     // Resolve effective key & model
     const effectiveModel = (model && model.trim()) ||
@@ -1509,7 +1509,7 @@ app.post('/api/generate-image', aiLimiter, async (req, res) => {
     const managed = profileId ? MANAGED_PROFILE_MAP.get(profileId) : undefined;
     const provider = managed ? managed.provider : rawProvider;
     const apiEndpoint = managed ? (managed.apiEndpoint || rawApiEndpoint) : rawApiEndpoint;
-    const model = managed ? (managed.renderModel || rawModel) : rawModel;
+    const model = managed ? (rawModel || managed.renderModel) : rawModel;
 
     // Anthropic does not support image generation
     if (provider === 'anthropic') {
@@ -1676,6 +1676,140 @@ app.post('/api/generate-image', aiLimiter, async (req, res) => {
   }
 });
 
+// Endpoint: List available models from a provider (dùng để tự động gợi ý model trong Settings)
+app.post('/api/list-models', apiLimiter, async (req, res) => {
+  try {
+    const schema = z.object({
+      provider: z.enum(['gemini', 'openai', 'anthropic']),
+      apiKey: z.string().max(500).optional().nullable(),
+      apiEndpoint: z.string().max(500).optional().nullable(),
+      profileId: z.string().max(150).optional().nullable(),
+    });
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Dữ liệu không hợp lệ', success: false });
+    }
+    let { provider, apiKey, apiEndpoint } = parsed.data;
+    const { profileId } = parsed.data;
+
+    // Profile managed: resolve key từ env, dùng endpoint của config.
+    const managed = profileId ? MANAGED_PROFILE_MAP.get(profileId) : undefined;
+    if (managed) {
+      provider = managed.provider;
+      apiEndpoint = managed.apiEndpoint || apiEndpoint;
+      apiKey = resolveManagedKey(managed);
+      if (!apiKey) {
+        return res.status(400).json({
+          success: false,
+          error: `Profile '${managed.name || managed.id}' chưa có API Key. Hãy set biến môi trường ${managed.keyEnv || '(keyEnv)'}.`,
+        });
+      }
+    }
+
+    let key = (apiKey || '').trim();
+    if (!key && provider === 'gemini') key = (process.env.GEMINI_API_KEY || '').trim();
+    if (!key) {
+      return res.status(400).json({
+        success: false,
+        error: `Chưa có API Key cho provider '${provider}'.`,
+      });
+    }
+    if (apiEndpoint) {
+      const v = validateCustomEndpoint(apiEndpoint);
+      if (!v.ok) return res.status(400).json({ success: false, error: v.error });
+    }
+
+    let models: string[] = [];
+
+    if (provider === 'gemini') {
+      const ai = new GoogleGenAI({
+        apiKey: key,
+        httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
+      });
+      const pager: any = await ai.models.list();
+      const collect = (m: any) => {
+        const id = m?.name || m?.id;
+        if (id) models.push(String(id).replace(/^models\//, ''));
+      };
+      if (pager && typeof pager[Symbol.asyncIterator] === 'function') {
+        for await (const m of pager) collect(m);
+      } else if (Array.isArray(pager?.models)) {
+        pager.models.forEach(collect);
+      } else if (Array.isArray(pager)) {
+        pager.forEach(collect);
+      }
+    } else if (provider === 'openai') {
+      const base = apiEndpoint?.replace(/\/$/, '') || 'https://api.openai.com/v1';
+      const paths = getOpenAIModelsCandidatePaths(base);
+      let lastErr = '';
+      for (const p of paths) {
+        const url = base + p;
+        try {
+          const r = await fetchWithTimeout(
+            url,
+            { method: 'GET', headers: { Authorization: `Bearer ${key}` } },
+            20000
+          );
+          if (r.ok) {
+            const data: any = await r.json();
+            const items = Array.isArray(data?.data)
+              ? data.data
+              : Array.isArray(data?.models)
+              ? data.models
+              : [];
+            models = items
+              .map((m: any) => (typeof m === 'string' ? m : m?.id || m?.name))
+              .filter(Boolean)
+              .map(String);
+            break;
+          }
+          const t = await r.text().catch(() => '');
+          lastErr = `${r.status} ${extractUpstreamErrorMessage(r.status, t)}`;
+          if (r.status !== 404 && r.status !== 405) break;
+        } catch (e: any) {
+          lastErr = e?.message || String(e);
+        }
+      }
+      if (models.length === 0) {
+        return res.status(502).json({
+          success: false,
+          error: `Không lấy được danh sách model từ '${base}'. ${lastErr}`,
+        });
+      }
+    } else if (provider === 'anthropic') {
+      const endpoint =
+        (apiEndpoint?.replace(/\/$/, '') || 'https://api.anthropic.com') + '/v1/models';
+      const r = await fetchWithTimeout(
+        endpoint,
+        {
+          method: 'GET',
+          headers: {
+            'x-api-key': key,
+            'anthropic-version': '2023-06-01',
+            'anthropic-dangerous-direct-browser-access': 'true',
+          },
+        },
+        20000
+      );
+      if (!r.ok) {
+        const t = await r.text().catch(() => '');
+        return res.status(502).json({
+          success: false,
+          error: `Không lấy được danh sách model: ${r.status} ${extractUpstreamErrorMessage(r.status, t)}`,
+        });
+      }
+      const data: any = await r.json();
+      const items = Array.isArray(data?.data) ? data.data : [];
+      models = items.map((m: any) => m?.id || m?.name).filter(Boolean).map(String);
+    }
+
+    models = Array.from(new Set(models)).sort();
+    return res.json({ success: true, provider, count: models.length, models: models.slice(0, 500) });
+  } catch (e: any) {
+    return res.status(500).json({ success: false, error: e?.message || 'Không lấy được danh sách model.' });
+  }
+});
+
 // Endpoint: Test profile connectivity (quick sanity check before user attempts real generation)
 app.post('/api/test-profile', apiLimiter, async (req, res) => {
   try {
@@ -1710,8 +1844,8 @@ app.post('/api/test-profile', apiLimiter, async (req, res) => {
       provider = managed.provider;
       apiKey = key;
       apiEndpoint = managed.apiEndpoint || apiEndpoint;
-      renderModel = managed.renderModel || renderModel;
-      analyzeModel = managed.analyzeModel || analyzeModel;
+      renderModel = renderModel || managed.renderModel;
+      analyzeModel = analyzeModel || managed.analyzeModel;
       role = managed.role || role;
     }
     const start = Date.now();

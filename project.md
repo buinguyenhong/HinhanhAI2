@@ -103,6 +103,8 @@ Xem `.env.example`:
 - Cả client (Vite bundle) lẫn server (esbuild bundle) đọc cùng file này lúc build.
 - Profile trong config là **managed**: luôn xuất hiện, ghi đè theo `id`, không sửa/xóa được trong UI (badge `CONFIG`). Profile do người dùng tự thêm vẫn lưu ở `localStorage` và được ghép thêm.
 - Client gửi `profileId` lên server; nếu là profile managed, server bỏ qua key client gửi và tự lấy từ env (`keyEnv`).
+- Profiles hiện có: `gemini-default` (`GEMINI_API_KEY`) và `1endpoint` (`ONEENDPOINT_API_KEY`, endpoint `https://1endpoint.dev/api/v1`, mặc định render `gpt-image-2`, analyze `gpt-4o`).
+- Model list: nút refresh trên profile trong Settings gọi API `/api/list-models`; endpoint OpenAI-compatible `/models` (có candidate paths) hoặc Gemini/Anthropic Models API. Có thể click model trả về để đổi model đang chọn; model override lưu trong localStorage/server sync. Provider không hỗ trợ `/models` thì cần nhập model thủ công.
 - Khi thêm provider mới: sửa `config/profiles.json`, thêm biến env tương ứng trên Render, push.
 
 Ví dụ:

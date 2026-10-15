@@ -106,8 +106,19 @@ export const DEFAULT_PROFILES: ApiProfile[] =
 // Ghép profile quản lý (config) với profile người dùng tự thêm (localStorage).
 // Managed luôn thắng theo id → cấu hình provider trong repo không bị mất/ghi đè.
 export function mergeProfiles(stored: ApiProfile[]): ApiProfile[] {
+  const storedById = new Map(stored.map((p) => [p.id, p]));
+  const managed = MANAGED_PROFILES.map((profile) => {
+    const local = storedById.get(profile.id);
+    return local
+      ? {
+          ...profile,
+          renderModel: local.renderModel || profile.renderModel,
+          analyzeModel: local.analyzeModel || profile.analyzeModel,
+        }
+      : profile;
+  });
   const custom = stored.filter((p) => !MANAGED_PROFILE_IDS.has(p.id));
-  const merged = [...MANAGED_PROFILES, ...custom];
+  const merged = [...managed, ...custom];
   return merged.length > 0 ? merged : DEFAULT_PROFILES;
 }
 
@@ -218,10 +229,14 @@ export const saveAppSettings = (settings: AppSettings): void => {
 // Ghi thuần vào localStorage — không phát event (dùng khi sync kéo dữ liệu về).
 export const writeSettingsLocally = (settings: AppSettings): void => {
   try {
-    // Không lưu profile managed vào localStorage — chúng được nạp lại từ config/profiles.json.
+    // Chỉ lưu model được chọn cho managed profile; config/provider/key luôn lấy từ repo/env.
+    const managedOverrides = settings.apiProfiles
+      .filter((p) => p.managed)
+      .map((p) => ({ id: p.id, renderModel: p.renderModel, analyzeModel: p.analyzeModel }));
+    const customProfiles = settings.apiProfiles.filter((p) => !p.managed);
     const persisted: AppSettings = {
       ...settings,
-      apiProfiles: settings.apiProfiles.filter((p) => !p.managed),
+      apiProfiles: [...managedOverrides, ...customProfiles] as ApiProfile[],
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(persisted));
   } catch (err) {
