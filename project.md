@@ -8,7 +8,7 @@ AI Image Studio (tên gọi khác: **HinhanhAI**) là một công cụ chỉnh s
 ## 2. Công nghệ / Stack
 - **Frontend:** React 19 + TypeScript + Vite 6 + Tailwind CSS 4 (`@tailwindcss/vite`), `lucide-react`, `motion`.
 - **Backend:** Express 4, chạy chung server với Vite (middleware mode khi dev; serve `dist/` khi production).
-- **Auth:** JWT (12h), mật khẩu qua biến môi trường `APP_PASSWORD`; cookie httpOnly + Bearer token.
+- **Auth:** JWT (mặc định 30 ngày, cấu hình qua `SESSION_TTL`), mật khẩu qua biến môi trường `APP_PASSWORD`; cookie httpOnly + Bearer token. Client tự kiểm tra `exp` của token và tự đưa về màn hình đăng nhập khi hết hạn.
 - **AI:** `@google/genai` (Gemini), gọi OpenAI/Anthropic qua `fetch` (OpenAI-compatible / Anthropic API).
 - **Google Drive:** OAuth token flow (GIS `gsi/client`), Drive API v3.
 - **Lưu trữ client:** `localStorage` (cài đặt + lịch sử).
@@ -83,7 +83,7 @@ Xem `.env.example`:
 | Endpoint | Method | Mục đích |
 |---|---|---|
 | `/api/health` | GET | Public health check. |
-| `/api/login` | POST | JWT 12h + cookie httpOnly. |
+| `/api/login` | POST | JWT (TTL qua `SESSION_TTL`, mặc định 30 ngày) + cookie httpOnly. |
 | `/api/gemini/analyze-style` | POST | Phân tích ảnh mẫu (multi-provider + vision). |
 | `/api/generate-image` | POST | Sinh ảnh (multi-provider). |
 | `/api/test-profile` | POST | Connectivity check thật (text probe + image route probe). |

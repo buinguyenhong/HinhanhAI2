@@ -28,6 +28,20 @@ if (isProduction && (!APP_PASSWORD || !JWT_SECRET)) {
   process.exit(1);
 }
 
+// Session lifetime cho đăng nhập 1-user. Mặc định 30 ngày (dùng cá nhân),
+// có thể chỉnh qua SESSION_TTL (ví dụ: "12h", "7d", "60m").
+function parseSessionTtlMs(ttl: string): number {
+  const m = /^(\d+)\s*([smhd])$/.exec(ttl.trim().toLowerCase());
+  if (!m) return 30 * 24 * 60 * 60 * 1000;
+  const n = parseInt(m[1], 10);
+  const unit = m[2];
+  const mult =
+    unit === 's' ? 1000 : unit === 'm' ? 60_000 : unit === 'h' ? 3_600_000 : 86_400_000;
+  return n * mult;
+}
+const SESSION_TTL = (process.env.SESSION_TTL || '30d').trim();
+const SESSION_TTL_MS = parseSessionTtlMs(SESSION_TTL);
+
 // (legacy) OPENAI_ALLOWED_DOMAINS — không còn dùng để chặn SSRF.
 // Người dùng tự chịu trách nhiệm chọn endpoint OpenAI-compatible tin cậy.
 // Vẫn đọc để không vỡ env cũ trên Render, nhưng không áp dụng nữa.
@@ -149,7 +163,7 @@ app.post('/api/login', loginLimiter, (req, res) => {
     });
   }
 
-  // Issue 12-hour JWT
+  // Issue session JWT (TTL cấu hình qua SESSION_TTL, mặc định 30 ngày)
   const token = jwt.sign(
     {
       authenticated: true,
@@ -158,7 +172,7 @@ app.post('/api/login', loginLimiter, (req, res) => {
     },
     JWT_SECRET,
     {
-      expiresIn: '12h',
+      expiresIn: SESSION_TTL as any,
     }
   );
 
@@ -167,13 +181,13 @@ app.post('/api/login', loginLimiter, (req, res) => {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'strict',
-    maxAge: 12 * 60 * 60 * 1000, // 12 hours
+    maxAge: SESSION_TTL_MS,
   });
 
   return res.json({
     success: true,
     token,
-    expiresIn: '12h',
+    expiresIn: SESSION_TTL,
   });
 });
 

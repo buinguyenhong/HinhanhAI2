@@ -1,4 +1,4 @@
-import { getAuthHeaders } from './authService';
+import { authFetch } from './authService';
 import { loadAppSettings, writeSettingsLocally, AppSettings, DEFAULT_SETTINGS } from './storageService';
 import { getStoredHistory, writeHistoryLocally } from './historyService';
 import type { HistoryItem } from '../types';
@@ -69,7 +69,8 @@ async function fetchWithTimeout(url: string, init: RequestInit, ms = 10000): Pro
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ms);
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    // authFetch tự gắn Bearer token và tự phát sự kiện hết hạn khi gặp 401.
+    return await authFetch(url, { ...init, signal: controller.signal });
   } finally {
     clearTimeout(timer);
   }
@@ -77,11 +78,8 @@ async function fetchWithTimeout(url: string, init: RequestInit, ms = 10000): Pro
 
 async function fetchRemoteState(): Promise<RemoteSyncState | null> {
   try {
-    const response = await fetchWithTimeout(
-      '/api/sync/state',
-      { headers: { ...getAuthHeaders() } },
-      4000
-    );
+    const response = await fetchWithTimeout('/api/sync/state', {}, 4000);
+    if (response.status === 401) return null; // authFetch đã phát sự kiện hết hạn
     if (!response.ok) return null;
     const json = await response.json();
     if (!json?.success) return null;
@@ -99,7 +97,7 @@ async function pushSettingsRemote(settings: AppSettings): Promise<number | null>
   try {
     const response = await fetchWithTimeout('/api/sync/settings', {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ settings }),
     });
     if (!response.ok) return null;
@@ -115,7 +113,7 @@ async function pushHistoryRemote(history: HistoryItem[]): Promise<number | null>
   try {
     const response = await fetchWithTimeout('/api/sync/history', {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ history: history.slice(0, 100) }),
     });
     if (!response.ok) return null;

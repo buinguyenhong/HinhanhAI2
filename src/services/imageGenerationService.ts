@@ -4,7 +4,7 @@ import {
   QualityMode,
 } from '../types';
 import { ApiProfile } from './storageService';
-import { getAuthHeaders } from './authService';
+import { authFetch } from './authService';
 
 async function fileOrUrlToBase64(fileOrUrl: File | string | null): Promise<string | null> {
   if (!fileOrUrl) return null;
@@ -76,11 +76,10 @@ export async function generateImages(params: GenerateImageParams): Promise<Gener
   const referenceImageBase64 = await fileOrUrlToBase64(referenceFile || referenceImage);
 
   try {
-    const response = await fetch('/api/generate-image', {
+    const response = await authFetch('/api/generate-image', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...getAuthHeaders(),
       },
       body: JSON.stringify({
         prompt,

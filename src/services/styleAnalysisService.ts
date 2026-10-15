@@ -1,6 +1,6 @@
 import { StyleAnalysisResult, AspectRatio, BackgroundPropObject } from '../types';
 import { ApiProfile } from './storageService';
-import { getAuthHeaders } from './authService';
+import { authFetch } from './authService';
 
 // Helper to convert image URL or File to base64
 export async function imageToBase64(imageSrc: string, file?: File | null): Promise<{ base64: string; mimeType: string }> {
@@ -563,11 +563,10 @@ export async function analyzeImageStyle(
     }
 
     // Call server endpoint (multi-provider aware)
-    const response = await fetch('/api/gemini/analyze-style', {
+    const response = await authFetch('/api/gemini/analyze-style', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...getAuthHeaders(),
       },
       body: JSON.stringify(body),
     });

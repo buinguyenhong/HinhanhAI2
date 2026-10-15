@@ -66,6 +66,22 @@ function AppContent() {
     };
   }, [isAuthenticated, setTheme]);
 
+  // Đồng bộ lại khi người dùng quay lại tab/cửa sổ (im lặng, không hiện loader).
+  // Giúp cài đặt/provider cập nhật từ server mà không cần đăng xuất/đăng nhập lại.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const resync = () => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      void performInitialSync();
+    };
+    document.addEventListener('visibilitychange', resync);
+    window.addEventListener('focus', resync);
+    return () => {
+      document.removeEventListener('visibilitychange', resync);
+      window.removeEventListener('focus', resync);
+    };
+  }, [isAuthenticated]);
+
   const handleLogin = () => {
     hasSyncedRef.current = false;
     setIsAuthenticated(true);

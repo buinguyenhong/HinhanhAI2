@@ -8,7 +8,8 @@
 
 | # | Commit | Tóm tắt |
 |---|---|---|
-| 14 | `HEAD` | **feat: real live dashboard metrics & activity ledger, drop static mock data** — kết nối DashboardView trực tiếp với getSavedHistory() và loadAppSettings(); xóa bỏ hoàn toàn số liệu mock 1,428 ảnh / credits / fake logs; đo lường phân bổ model AI thực tế và phản ứng thời gian thực qua sync events; lưu tên model chính xác vào history. |
+| 15 | `HEAD` | **fix(auth): session dài hạn + tự phát hiện hết hạn, tự sync lại khi quay lại tab** — client tự decode `exp` JWT (`isTokenExpired`) để `isUserAuthenticated()` không còn "zombie session"; thêm `authFetch()` gắn Bearer + bắt 401 tập trung → tự đưa về màn hình Login (áp dụng cho sync, generate, analyze); `App.tsx` tự `performInitialSync()` khi tab/cửa sổ active trở lại; server `SESSION_TTL` (mặc định 30d thay cho 12h); xóa `firebase-applet-config.json` (dead code). |
+| 14 | `a6ab8fa` | **feat: real live dashboard metrics & activity ledger, drop static mock data** — kết nối DashboardView trực tiếp với getSavedHistory() và loadAppSettings(); xóa bỏ hoàn toàn số liệu mock 1,428 ảnh / credits / fake logs; đo lường phân bổ model AI thực tế và phản ứng thời gian thực qua sync events; lưu tên model chính xác vào history. |
 | 13 | `477c1d5` | **feat: role-based dynamic inputs, smart OpenAI candidate paths & test probe hardening** — chỉ hiện textbox model tương ứng theo vai trò (render/analyze/both); tự động nhận diện candidate paths /api/v1 cho 1endpoint.dev & OpenAI proxies; bỏ tham số quality cho model không phải dall-e-3; sửa test probe cho role render qua /models. |
 | 12 | `477c3ca` | **feat: dual test buttons in modal, Imagen SDK support & API logic hardening** — nút Test kết nối + Test model sinh ảnh với preview thumbnail & lightbox; hỗ trợ generateImages cho Imagen 3; parse JSON an toàn cho OpenAI markdown; nâng rate limit AI lên 120; chuẩn hóa OpenAI proxy paths. |
 | 11 | `db3925f` | **feat: cloud sync store, fix encoding, and harden lifecycle & storage** — sync settings & history qua JSON file server (/api/sync/*); fix triệt để 5 chỗ mojibake UTF-8; memoize ThemeContext & guard hasSyncedRef; quota fallback cho history localStorage; dẹp warning Vite. |
@@ -82,7 +83,7 @@
 | Endpoint | Method | Mục đích |
 |---|---|---|
 | `/api/health` | GET | Public. |
-| `/api/login` | POST | JWT 12h + cookie httpOnly. |
+| `/api/login` | POST | JWT (TTL qua `SESSION_TTL`, mặc định 30 ngày) + cookie httpOnly. |
 | `/api/gemini/analyze-style` | POST | Phân tích ảnh mẫu (multi-provider + vision). |
 | `/api/generate-image` | POST | Sinh ảnh (multi-provider, không Pollinations). |
 | `/api/test-profile` | POST | Connectivity check thật: text probe (analyze) + image probe (render). |
