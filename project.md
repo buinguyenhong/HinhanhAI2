@@ -19,7 +19,7 @@ AI Image Studio (tên gọi khác: **HinhanhAI**) là một công cụ chỉnh s
 ### 3.1. Khu vực Chỉnh sửa (Editor)
 - Tải **Ảnh Gốc** (bắt buộc) và **Ảnh Mẫu** (tùy chọn, để tham khảo phong cách).
 - **Phân tích AI & Trích xuất Prompt** (Style Analyzer): đọc hiểu ảnh mẫu, xuất prompt chuẩn (EN/VI), negative prompt, gợi ý tỷ lệ khung hình; cho phép ghép prompt theo module (style/background/lighting/camera/colors/subject).
-- Tùy chỉnh đầu ra: số biến thể (1–4), tỷ lệ khung hình, chất lượng, negative prompt, seed, CFG.
+- Tùy chỉnh đầu ra: số biến thể (1–4), tỷ lệ khung hình, chất lượng, negative prompt, seed, CFG. Ảnh gốc chỉ dùng giữ chủ thể khi model hỗ trợ image-reference/edit; thanh phần trăm chỉ nhấn mạnh prompt, không cam kết giống mặt 100%.
 - Quy trình duyệt & lưu: grid so sánh → chọn 1 ảnh → "Chốt hình & Lưu lên Drive" hoặc "Tạo lại".
 - Lịch sử tự lưu vào `localStorage`.
 
@@ -97,7 +97,13 @@ Xem `.env.example`:
 | `openai` ([OI]-compatible) | ✅ | ✅ | Thử `/images/generations`, `/images`, `/v1/images/generations`. |
 | `anthropic` | ❌ | ✅ | UI chặn role render; server trả 400 nếu cố. |
 
-### 5.3. Provider config trong repo (`config/profiles.json`)
+### 5.3. Image reference / face likeness
+- Ảnh gốc phải được gửi vào API sinh ảnh dưới dạng image input/edit; mô tả văn bản hoặc slider không thể khóa danh tính.
+- Gemini: `imagen-3.0-capability-*` dùng SDK `editImage` với `SubjectReferenceImage`; `imagen-*-generate-*` không nhận source image và backend báo lỗi nếu cố dùng với khóa chủ thể. Gemini image-capable models cũng nhận ảnh trực tiếp qua `generateContent`.
+- OpenAI-compatible: profile `1endpoint` dùng multipart `/images/edits` với field ảnh; đã giới hạn face-lock path cho `gpt-image-2`. Nếu endpoint/model không hỗ trợ image edits, backend trả lỗi thay vì âm thầm gửi prompt text-only.
+- Slider phần trăm là cường độ nhấn mạnh prompt, không phải ControlNet weight và không đảm bảo likeness tuyệt đối.
+
+### 5.4. Provider config trong repo (`config/profiles.json`)
 - Danh sách provider được định nghĩa trong **`config/profiles.json`** (commit vào repo) — KHÔNG chứa API key.
 - Mỗi profile có trường **`keyEnv`** = tên biến môi trường chứa key. Server resolve key từ env khi profile được chọn.
 - Cả client (Vite bundle) lẫn server (esbuild bundle) đọc cùng file này lúc build.

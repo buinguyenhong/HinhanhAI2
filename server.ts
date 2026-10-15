@@ -2,7 +2,7 @@ import express, { Request, Response, NextFunction } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
-import { GoogleGenAI, Type } from '@google/genai';
+import { GoogleGenAI, Type, SubjectReferenceImage, SubjectReferenceType, StyleReferenceImage } from '@google/genai';
 import dotenv from 'dotenv';
 import cookieParser from 'cookie-parser';
 import jwt from 'jsonwebtoken';
@@ -590,6 +590,14 @@ async function analyzeWithGemini(opts: {
     }
   }
 
+  function getOpenAIImageEditCandidatePaths(base: string): string[] {
+    const clean = base.replace(/\/$/, '');
+    if (/\/images\/edits$/i.test(clean)) return [''];
+    if (/\/v1$/i.test(clean)) return ['/images/edits'];
+    if (/\/api$/i.test(clean)) return ['/v1/images/edits', '/images/edits'];
+    return ['/api/v1/images/edits', '/v1/images/edits', '/images/edits'];
+  }
+
   function getOpenAIImageCandidatePaths(base: string): string[] {
     const clean = base.replace(/\/$/, '');
     if (/\/images\/generations$/i.test(clean)) {
@@ -1085,11 +1093,11 @@ async function extractSubjectFacialProfile(opts: {
 
   try {
     const ai = new GoogleGenAI({
-      apiKey: opts.apiKey,
-      httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
-    });
+        apiKey: opts.apiKey,
+        httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
+      });
 
-    const targetModel = opts.model || 'gemini-2.5-flash';
+      const targetModel = 'gemini-2.5-flash';
 
     const extractionPromise = ai.models.generateContent({
       model: targetModel,
@@ -1097,13 +1105,13 @@ async function extractSubjectFacialProfile(opts: {
         parts: [
           {
             inlineData: {
-              mimeType: 'image/jpeg',
+              mimeType: opts.imageBase64.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,/)?.[1] || 'image/jpeg',
               data: cleanBase64,
             },
           },
           {
             text: `You are an expert biometric portrait analyst and character consistency director for AI visual generation.
-Analyze the primary person/character in this photo with surgical detail so an AI image model can reproduce the EXACT SAME PERSON with 100% facial and appearance likeness.
+Analyze the primary person/character in this photo with detailed visual traits that can help an image model recognize the subject.
 
 Provide a compact, high-fidelity English description (approx 50-80 words) strictly detailing:
 1. Perceived gender, approximate age, and heritage/ethnicity likeness.
@@ -1183,11 +1191,70 @@ async function generateWithGemini(p: GenerateParams): Promise<GeneratedVariant[]
   });
   const out: GeneratedVariant[] = [];
   const baseSeed = p.seed && p.seed !== '-1' ? parseInt(p.seed, 10) : Math.floor(Math.random() * 900000) + 100000;
+  const hasInputImages = Boolean(p.sourceImageBase64 || p.referenceImageBase64);
 
   const isImagenModel = p.model.toLowerCase().includes('imagen');
+  const isImagen3Capability = /imagen-3.*capability/i.test(p.model);
 
-  // Ưu tiên 1: Với model Imagen (ví dụ imagen-3.0-generate-002), dùng phương thức generateImages chuẩn của Google GenAI SDK
-  if (isImagenModel) {
+  if (hasInputImages && isImagen3Capability) {
+    const referenceImages: Array<SubjectReferenceImage | StyleReferenceImage> = [];
+    let referenceId = 1;
+    if (p.sourceImageBase64) {
+      const match = p.sourceImageBase64.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,/);
+      const subjectReference = new SubjectReferenceImage();
+      subjectReference.referenceId = referenceId++;
+      subjectReference.referenceImage = {
+        imageBytes: p.sourceImageBase64.replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, ''),
+        mimeType: match?.[1] || 'image/jpeg',
+      };
+      subjectReference.config = { subjectType: SubjectReferenceType.SUBJECT_TYPE_PERSON };
+      referenceImages.push(subjectReference);
+    }
+    if (p.referenceImageBase64) {
+      const match = p.referenceImageBase64.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,/);
+      const styleReference = new StyleReferenceImage();
+      styleReference.referenceId = referenceId;
+      styleReference.referenceImage = {
+        imageBytes: p.referenceImageBase64.replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, ''),
+        mimeType: match?.[1] || 'image/jpeg',
+      };
+      styleReference.config = { styleDescription: 'Use this image as a visual style reference.' };
+      referenceImages.push(styleReference);
+    }
+    const subjectReferenceId = p.sourceImageBase64 ? 1 : null;
+    const styleReferenceId = p.referenceImageBase64 ? (p.sourceImageBase64 ? 2 : 1) : null;
+    const referenceInstructions = [
+      subjectReferenceId ? `Use subject reference image ${subjectReferenceId} as the same person/character. Preserve their recognizable identity.` : '',
+      styleReferenceId ? `Use style reference image ${styleReferenceId} for visual style only.` : '',
+    ].filter(Boolean).join(' ');
+    const response = await ai.models.editImage({
+      model: p.model,
+      prompt: `${referenceInstructions} ${p.prompt}`.trim(),
+      referenceImages,
+      config: {
+        numberOfImages: Math.min(Math.max(p.variations || 1, 1), 4),
+        aspectRatio: p.aspectRatio,
+        outputMimeType: 'image/jpeg',
+      },
+    });
+    response?.generatedImages?.forEach((img: any, idx: number) => {
+      if (img?.image?.imageBytes) {
+        out.push({
+          url: `data:image/jpeg;base64,${img.image.imageBytes}`,
+          seed: (baseSeed + idx * 1337).toString(),
+          modelUsed: `Google Imagen (${p.model})`,
+        });
+      }
+    });
+    if (out.length > 0) return out;
+    throw new Error(`Model '${p.model}' editImage did not return any images.`);
+  }
+
+  if (hasInputImages && isImagenModel && !isImagen3Capability) {
+    throw new Error(`Model '${p.model}' does not support subject reference editing. Use an Imagen 3 capability model or an image-capable Gemini model.`);
+  }
+
+  if (isImagenModel && !hasInputImages) {
     const validRatios = ['1:1', '3:4', '4:3', '9:16', '16:9'];
     const ratio = validRatios.includes(p.aspectRatio) ? p.aspectRatio : '1:1';
     try {
@@ -1222,30 +1289,34 @@ async function generateWithGemini(p: GenerateParams): Promise<GeneratedVariant[]
     const itemSeed = (baseSeed + i * 1337).toString();
     const parts: any[] = [];
     if (p.sourceImageBase64) {
+      const match = p.sourceImageBase64.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,/);
       parts.push({
         inlineData: {
-          mimeType: 'image/jpeg',
-          data: p.sourceImageBase64.replace(/^data:image\/[a-zA-Z0-9+]+;base64,/, ''),
+          mimeType: match?.[1] || 'image/jpeg',
+          data: p.sourceImageBase64.replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, ''),
         },
       });
     }
     if (p.referenceImageBase64) {
+      const match = p.referenceImageBase64.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,/);
       parts.push({
         inlineData: {
-          mimeType: 'image/jpeg',
-          data: p.referenceImageBase64.replace(/^data:image\/[a-zA-Z0-9+]+;base64,/, ''),
+          mimeType: match?.[1] || 'image/jpeg',
+          data: p.referenceImageBase64.replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, ''),
         },
       });
     }
     parts.push({ text: p.prompt });
 
     try {
+      const isGeminiImageModel = /image/i.test(p.model);
       const response = await ai.models.generateContent({
         model: p.model,
         contents: { parts },
         config: {
           imageConfig: { aspectRatio: p.aspectRatio },
-        },
+          ...(isGeminiImageModel ? { responseModalities: ['IMAGE'] } : {}),
+        } as any,
       });
       const candidates = response.candidates;
       if (candidates && candidates[0]?.content?.parts) {
@@ -1260,6 +1331,9 @@ async function generateWithGemini(p: GenerateParams): Promise<GeneratedVariant[]
             break;
           }
         }
+      }
+      if (out.length === 0) {
+        throw new Error(`Model '${p.model}' không trả về ảnh. Chọn model hỗ trợ tạo ảnh (gemini-2.5-flash-image hoặc imagen-3.0-capability-001).`);
       }
     } catch (err: any) {
       console.warn(`Gemini generate (${p.model}) variant ${i} failed:`, err?.message);
@@ -1276,7 +1350,9 @@ async function singleCallOpenAI(
   reqBody: Record<string, any>,
   model: string,
   baseSeed: number,
-  index: number
+  index: number,
+  sourceImageBase64?: string | null,
+  referenceImageBase64?: string | null
 ): Promise<GeneratedVariant[]> {
   const body = JSON.stringify(reqBody);
   let lastErr = '';
@@ -1284,19 +1360,40 @@ async function singleCallOpenAI(
     const url = base + path;
     let response: globalThis.Response;
     try {
+      const headers: Record<string, string> = {
+        Authorization: `Bearer ${apiKey}`,
+        'User-Agent': 'HinhanhAI/2.0 (Windows NT 10.0; Win64; x64)',
+        Accept: 'application/json',
+      };
+      let requestBody: BodyInit;
+      if (sourceImageBase64 || referenceImageBase64) {
+        const form = new FormData();
+        form.append('model', String(reqBody.model || model));
+        form.append('prompt', String(reqBody.prompt || ''));
+        if (reqBody.size) form.append('size', String(reqBody.size));
+        if (reqBody.quality) form.append('quality', String(reqBody.quality));
+        if (referenceImageBase64) {
+          const referenceData = referenceImageBase64.match(/^data:([^;]+);base64,(.+)$/);
+          if (!referenceData) throw new Error('Ảnh mẫu không phải data URL base64 hợp lệ.');
+          const referenceBuffer = Buffer.from(referenceData[2], 'base64');
+          const referenceExt = referenceData[1].split('/')[1]?.replace(/[^a-zA-Z0-9]/g, '') || 'png';
+          form.append(sourceImageBase64 ? 'image[]' : 'image', new Blob([referenceBuffer], { type: referenceData[1] }), `reference.${referenceExt}`);
+        }
+        if (sourceImageBase64) {
+          const imageData = sourceImageBase64.match(/^data:([^;]+);base64,(.+)$/);
+          if (!imageData) throw new Error('Ảnh gốc không phải data URL base64 hợp lệ.');
+          const imageBuffer = Buffer.from(imageData[2], 'base64');
+          const extension = imageData[1].split('/')[1]?.replace(/[^a-zA-Z0-9]/g, '') || 'png';
+          form.append('image', new Blob([imageBuffer], { type: imageData[1] }), `source.${extension}`);
+        }
+        requestBody = form;
+      } else {
+        headers['Content-Type'] = 'application/json';
+        requestBody = body;
+      }
       response = await fetchWithTimeout(
         url,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${apiKey}`,
-            'User-Agent': 'HinhanhAI/2.0 (Windows NT 10.0; Win64; x64)',
-            Accept: 'application/json',
-            Connection: 'close',
-          },
-          body,
-        },
+        { method: 'POST', headers, body: requestBody },
         GENERATE_TIMEOUT_MS
       );
     } catch (err: any) {
@@ -1336,7 +1433,7 @@ async function singleCallOpenAI(
     const humanMsg = extractUpstreamErrorMessage(response.status, errText);
 
     // If 400 Bad Request and body had 'size' or 'quality', try falling back once with minimal body
-    if (response.status === 400 && (reqBody.size || reqBody.quality) && !/dall-e/i.test(model)) {
+    if (response.status === 400 && !sourceImageBase64 && !referenceImageBase64 && (reqBody.size || reqBody.quality) && !/dall-e/i.test(model)) {
       console.warn(`Custom model ${model} returned 400 with optional params. Retrying with minimal parameters...`);
       const fallbackBody = { ...reqBody };
       delete fallbackBody.size;
@@ -1394,15 +1491,19 @@ async function singleCallOpenAI(
   }
 
   // All candidates 404'd → endpoint clearly does not support image generation.
+  const routeName = sourceImageBase64 || referenceImageBase64 ? '/images/edits' : '/images/generations';
   throw new Error(
-    `Endpoint '${base}' không hỗ trợ sinh ảnh (thử ${candidatePaths.join(', ')} đều 404). ` +
-    `Hãy chọn endpoint có route OpenAI /images/generations (VD: api.openai.com, 1endpoint.dev/api/v1).`
+    `Endpoint '${base}' không hỗ trợ ${sourceImageBase64 || referenceImageBase64 ? 'image edit' : 'sinh ảnh'} (thử ${candidatePaths.join(', ')} đều 404). ` +
+    `Cần có route OpenAI-compatible ${routeName}.`
   );
 }
 
 async function generateWithOpenAI(p: GenerateParams): Promise<GeneratedVariant[]> {
   const base = p.apiEndpoint?.replace(/\/$/, '') || 'https://api.openai.com/v1';
-  const candidatePaths = getOpenAIImageCandidatePaths(base);
+  const hasInputImages = Boolean(p.sourceImageBase64 || p.referenceImageBase64);
+  const candidatePaths = hasInputImages
+    ? getOpenAIImageEditCandidatePaths(base)
+    : getOpenAIImageCandidatePaths(base);
   const sizeMap: Record<string, string> = {
     '1:1': '1024x1024',
     '16:9': '1792x1024',
@@ -1423,7 +1524,7 @@ async function generateWithOpenAI(p: GenerateParams): Promise<GeneratedVariant[]
       n: Math.max(1, Math.min(p.variations || 1, 4)),
       size: '1024x1024',
     };
-    return singleCallOpenAI(base, candidatePaths, p.apiKey, reqBody, p.model, baseSeed, 0);
+    return singleCallOpenAI(base, candidatePaths, p.apiKey, reqBody, p.model, baseSeed, 0, p.sourceImageBase64, p.referenceImageBase64);
   }
 
   // DALL-E 3 & Custom Models (gpt-image-2, Flux, Midjourney wrapper, etc.):
@@ -1456,7 +1557,7 @@ async function generateWithOpenAI(p: GenerateParams): Promise<GeneratedVariant[]
     }
 
     try {
-      const variants = await singleCallOpenAI(base, candidatePaths, p.apiKey, reqBody, p.model, baseSeed, i);
+      const variants = await singleCallOpenAI(base, candidatePaths, p.apiKey, reqBody, p.model, baseSeed, i, p.sourceImageBase64, p.referenceImageBase64);
       out.push(...variants);
     } catch (err: any) {
       // If we already generated at least 1 image, return it rather than failing the whole user request
@@ -1521,7 +1622,7 @@ app.post('/api/generate-image', aiLimiter, async (req, res) => {
 
     // Resolve effective key & model
     const effectiveModel = (model && model.trim()) ||
-      (provider === 'gemini' ? 'imagen-3.0-generate-002' : 'gpt-image-1');
+      (provider === 'gemini' ? 'gemini-2.5-flash-image' : 'gpt-image-1');
     let effectiveKey = managed ? resolveManagedKey(managed) : ((rawApiKey && rawApiKey.trim()) || '');
     if (!effectiveKey && !managed) {
       if (provider === 'gemini') effectiveKey = process.env.GEMINI_API_KEY || '';
@@ -1543,13 +1644,23 @@ app.post('/api/generate-image', aiLimiter, async (req, res) => {
       }
     }
 
+    if (sourceImageBase64 && (preserveStructure || preserveFace) && provider === 'gemini' && !/imagen-3.*capability/i.test(effectiveModel) && !/gemini-(2\.5-flash-image|3-pro-image)/i.test(effectiveModel)) {
+      return res.status(400).json({
+        success: false,
+        error: `Model '${effectiveModel}' không được nhận diện là model hỗ trợ ảnh tham chiếu. Chọn Imagen 3 Capability hoặc model Gemini image-capable.`,
+      });
+    }
+    if (sourceImageBase64 && (preserveStructure || preserveFace) && provider === 'openai' && !/gpt-image-2/i.test(effectiveModel)) {
+      return res.status(400).json({
+        success: false,
+        error: `Model '${effectiveModel}' chưa được cấu hình để nhận ảnh gốc làm image edit. Chọn model OpenAI-compatible có hỗ trợ image edits (ví dụ gpt-image) hoặc tắt khóa gương mặt.`,
+      });
+    }
+
     // --- SUBJECT FACIAL & CHARACTER IDENTITY EXTRACTION ---
-    // Khi có ảnh gốc (sourceImageBase64) và bật preserveStructure/preserveFace:
-    // Tự động phân tích sinh trắc học và cấu trúc gương mặt của nhân vật gốc,
-    // khóa nhận diện để hình ảnh tạo ra KHÔNG bị sai lệch gương mặt hoặc biến dạng nhân vật.
     let detectedSubjectProfile: string | null = null;
     if (sourceImageBase64 && (preserveStructure || preserveFace)) {
-      const visionKey = (provider === 'gemini' ? effectiveKey : (process.env.GEMINI_API_KEY || effectiveKey));
+      const visionKey = (provider === 'gemini' ? effectiveKey : process.env.GEMINI_API_KEY || '');
       if (visionKey) {
         try {
           detectedSubjectProfile = await extractSubjectFacialProfile({
@@ -1568,16 +1679,16 @@ app.post('/api/generate-image', aiLimiter, async (req, res) => {
     if (detectedSubjectProfile) {
       const fidelityPct = Math.round(controlNetWeight * 100);
       const faceLockPrefix =
-        `[CRITICAL SUBJECT IDENTITY & ${fidelityPct}% FACE PRESERVATION]: The primary subject MUST be the EXACT SAME CHARACTER from the reference portrait. ` +
-        `Biometric facial features & appearance: ${detectedSubjectProfile}. ` +
-        `Maintain 100% identical facial bone structure, jawline, eye shape, nose shape, lips, skin tone, hairstyle, and character identity with ZERO facial alteration or morphing. ` +
-        `Generate this exact person in the requested scene: `;
+        `[SUBJECT REFERENCE (${fidelityPct}% PROMPT EMPHASIS)]: Use the supplied source image as the identity reference for the primary subject. ` +
+        `Recognizable subject traits: ${detectedSubjectProfile}. ` +
+        `Preserve the recognizable facial features, jawline, eye shape, nose shape, lips, skin tone, and hairstyle from the reference image. ` +
+        `Place the subject in the requested scene: `;
       finalPrompt = `${faceLockPrefix}${trimmedPrompt}`;
     } else if (sourceImageBase64 && (preserveStructure || preserveFace)) {
       const fidelityPct = Math.round(controlNetWeight * 100);
       const faceLockPrefix =
-        `[CRITICAL CHARACTER & FACE PRESERVATION (${fidelityPct}% LIKENESS)]: Maintain the EXACT SAME human subject, identical facial bone structure, jawline, eye shape, nose shape, lip shape, hairstyle, skin tone, and character identity from the reference portrait with ZERO facial alteration or person swap. ` +
-        `Generate this exact person in the requested scene: `;
+        `[SUBJECT REFERENCE (${fidelityPct}% PROMPT EMPHASIS)]: Preserve the recognizable human subject from the supplied source image. ` +
+        `Place the subject in the requested scene: `;
       finalPrompt = `${faceLockPrefix}${trimmedPrompt}`;
     }
 

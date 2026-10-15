@@ -38,7 +38,7 @@ export const EditorView: React.FC = () => {
     controlNetWeight: 0.85,
     negativePrompt: '',
     seed: '-1',
-    model: activeRenderProfile.renderModel || 'imagen-3.0-generate-002',
+    model: activeRenderProfile.renderModel || 'gemini-2.5-flash-image',
     cfgScale: 7.0,
   });
 

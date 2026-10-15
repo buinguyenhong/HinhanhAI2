@@ -105,7 +105,7 @@ export const SourceUploader: React.FC<SourceUploaderProps> = ({
               {sourceFile?.name || 'source_portrait.jpg'}
             </span>
             <span className="text-[9px] font-mono px-2 py-0.5 bg-[#22C55E]/15 text-[#15803D] dark:text-[#4ADE80] font-medium flex items-center gap-1">
-              ✓ Khóa gương mặt
+              ✓ Ảnh chủ thể sẵn sàng
             </span>
           </div>
         </div>

@@ -6,7 +6,7 @@
       "provider": "gemini",
       "role": "both",
       "apiEndpoint": "https://generativelanguage.googleapis.com",
-      "renderModel": "imagen-3.0-generate-002",
+      "renderModel": "gemini-2.5-flash-image",
       "analyzeModel": "gemini-3.7-flash",
       "notes": "Sinh ảnh (Imagen) + phân tích ảnh mẫu (Gemini Vision). Key lấy từ env GEMINI_API_KEY.",
       "keyEnv": "GEMINI_API_KEY"

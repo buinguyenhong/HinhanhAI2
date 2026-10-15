@@ -56,7 +56,7 @@ const FALLBACK_PROFILES: ApiProfile[] = [
     role: 'both',
     apiKey: '',
     apiEndpoint: 'https://generativelanguage.googleapis.com',
-    renderModel: 'imagen-3.0-generate-002',
+    renderModel: 'gemini-2.5-flash-image',
     analyzeModel: 'gemini-3.7-flash',
     notes: 'Dùng cho cả sinh ảnh (Imagen) và phân tích ảnh mẫu (Gemini Vision)',
     isCustom: false,
@@ -113,7 +113,10 @@ export function mergeProfiles(stored: ApiProfile[]): ApiProfile[] {
       ? {
           ...profile,
           role: local.role || profile.role,
-          renderModel: local.renderModel || profile.renderModel,
+          renderModel:
+            local.renderModel === 'imagen-3.0-generate-002' && profile.id === 'gemini-default'
+              ? profile.renderModel
+              : local.renderModel || profile.renderModel,
           analyzeModel: local.analyzeModel || profile.analyzeModel,
         }
       : profile;
@@ -165,7 +168,7 @@ function normalizeProfile(p: any): ApiProfile {
   if (!renderModel) {
     renderModel =
       provider === 'gemini'
-        ? 'imagen-3.0-generate-002'
+        ? 'gemini-2.5-flash-image'
         : provider === 'anthropic'
         ? ''
         : 'gpt-image-1';

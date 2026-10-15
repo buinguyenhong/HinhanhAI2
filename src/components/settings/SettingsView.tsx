@@ -51,7 +51,7 @@ const PROVIDER_PRESETS: Record<
 > = {
   gemini: {
     endpoint: 'https://generativelanguage.googleapis.com',
-    renderModel: 'imagen-3.0-generate-002',
+    renderModel: 'gemini-2.5-flash-image',
     analyzeModel: 'gemini-3.7-flash',
     notes: 'Google Gemini & Imagen (hỗ trợ cả sinh ảnh và phân tích)',
   },
@@ -1733,7 +1733,7 @@ export const SettingsView: React.FC = () => {
                   <p className="text-[10px] text-[#9C988F] dark:text-[#5E5D57] italic">
                     {formProvider === 'openai'
                       ? 'Ví dụ: gpt-image-2, dall-e-3, dall-e-2, flux-pro, midjourney proxy...'
-                      : 'Ví dụ: imagen-3.0-generate-002'}
+                      : 'Ví dụ: gemini-2.5-flash-image (nhận ảnh chủ thể), imagen-3.0-capability-001'}
                   </p>
                 </div>
               )}

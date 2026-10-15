@@ -85,7 +85,7 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
                 status={activeStep > 1 ? 'done' : activeStep === 1 ? 'active' : 'pending'}
               />
               <ProgressRow
-                label="Rendering variations with ControlNet"
+                label="Rendering with source-image reference"
                 status={activeStep > 2 ? 'done' : activeStep === 2 ? 'active' : 'pending'}
               />
               <ProgressRow

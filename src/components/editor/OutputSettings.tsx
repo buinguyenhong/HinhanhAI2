@@ -26,7 +26,6 @@ export const OutputSettings: React.FC<OutputSettingsProps> = ({
   const renderProfile = getRenderProfile(appSettings);
 
   const renderProfiles = appSettings.apiProfiles.filter((p) => p.role !== 'analyze');
-
   const update = <K extends keyof GenerationSettings>(
     key: K,
     value: GenerationSettings[K]
@@ -181,19 +180,25 @@ export const OutputSettings: React.FC<OutputSettingsProps> = ({
             <ShieldCheck size={15} className={settings.preserveStructure && hasSourceImage ? 'text-[#15803D] dark:text-[#4ADE80]' : 'text-[#9C988F]'} />
             <div>
               <p className="text-[11px] uppercase tracking-wider font-semibold text-[#1C1B18] dark:text-[#E8E7E2]">
-                Khóa gương mặt & nhân vật gốc
+                Tham chiếu chủ thể & khuôn mặt
               </p>
               <p className="text-[9px] text-[#9C988F] dark:text-[#7A7870] font-mono">
                 {hasSourceImage
-                  ? 'Bảo toàn 100% tỷ lệ xương mặt, mắt, mũi, miệng & nhân vật'
-                  : 'Tải ảnh chủ thể ở trên để khóa nhận diện gương mặt'}
+                  ? 'Ảnh chủ thể sẽ được gửi làm image reference; độ giống tùy thuộc model'
+                  : 'Tải ảnh chủ thể để dùng làm tham chiếu nếu model hỗ trợ'}
               </p>
             </div>
           </div>
           <input
             type="checkbox"
             checked={settings.preserveStructure}
-            onChange={(e) => update('preserveStructure', e.target.checked)}
+            onChange={(e) =>
+              onChange({
+                ...settings,
+                preserveStructure: e.target.checked,
+                preserveFace: e.target.checked,
+              })
+            }
             className="w-4 h-4 accent-[#1C1B18] dark:accent-[#D8D3C5] cursor-pointer"
           />
         </div>
@@ -201,7 +206,7 @@ export const OutputSettings: React.FC<OutputSettingsProps> = ({
         {hasSourceImage && settings.preserveStructure && (
           <div className="mt-2.5 pt-2.5 border-t border-[#EAE5DC] dark:border-[#222220] space-y-2">
             <div className="flex justify-between items-center text-[10px] font-mono">
-              <span className="text-[#6E6B64] dark:text-[#8C8B84]">Mức độ bám sát gương mặt (Fidelity)</span>
+              <span className="text-[#6E6B64] dark:text-[#8C8B84]">Cường độ nhấn mạnh tham chiếu (prompt)</span>
               <span className="font-bold text-[#1C1B18] dark:text-[#E8E7E2]">{Math.round(settings.controlNetWeight * 100)}%</span>
             </div>
             <input
@@ -215,7 +220,7 @@ export const OutputSettings: React.FC<OutputSettingsProps> = ({
             />
             <div className="flex items-center gap-1.5 text-[9px] font-mono text-[#15803D] dark:text-[#4ADE80]">
               <Lock size={10} />
-              <span>Chế độ giữ nguyên gương mặt: ĐANG KÍCH HOẠT</span>
+              <span>Ảnh gốc được gửi làm tham chiếu khi model hỗ trợ</span>
             </div>
           </div>
         )}
