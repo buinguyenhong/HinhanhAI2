@@ -182,7 +182,7 @@ function getDefaultVisualMetrics() {
   };
 }
 
-// Built-in Intelligent Visual Breakdown Generator (Guarantees zero downtime)
+// Optional local visual heuristics. This is not an AI image analysis and is not used as an automatic fallback.
 export async function generateIntelligentVisualAnalysis(
   imageSrc: string,
   userFocus?: string
@@ -539,57 +539,56 @@ function normalizeAnalysis(raw: any): StyleAnalysisResult {
   return result;
 }
 
-// Main API analysis function: Tries backend (multi-provider) first, gracefully falls back to intelligent visual engine
+// Analyze with the selected AI provider. Do not replace provider failures with fabricated analysis.
 export async function analyzeImageStyle(
   imageSrc: string,
   file?: File | null,
   userFocus?: string,
   analyzeProfile?: ApiProfile | null
 ): Promise<StyleAnalysisResult> {
-  try {
-    const { base64, mimeType } = await imageToBase64(imageSrc, file);
+  const { base64, mimeType } = await imageToBase64(imageSrc, file);
+  const body: any = {
+    imageBase64: base64,
+    mimeType,
+    userFocus,
+  };
 
-    const body: any = {
-      imageBase64: base64,
-      mimeType,
-      userFocus,
-    };
-
-    if (analyzeProfile) {
-      body.provider = analyzeProfile.provider;
-      body.model = analyzeProfile.analyzeModel;
-      body.apiKey = analyzeProfile.apiKey || undefined;
-      body.apiEndpoint = analyzeProfile.apiEndpoint || undefined;
-      body.profileId = analyzeProfile.id;
-    }
-
-    // Call server endpoint (multi-provider aware)
-    const response = await authFetch('/api/gemini/analyze-style', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    });
-
-    if (response.ok) {
-      const data = await response.json();
-      if (data.success && data.analysis) {
-        try {
-          return {
-            ...normalizeAnalysis(data.analysis),
-            analyzedAt: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-            sourceImagePreview: imageSrc,
-          };
-        } catch (normErr) {
-          console.warn('Failed to normalize analysis payload, using visual engine:', normErr);
-        }
-      }
-    }
-  } catch (err) {
-    console.warn('Backend style analysis request failed, switching to visual engine:', err);
+  if (analyzeProfile) {
+    body.provider = analyzeProfile.provider;
+    body.model = analyzeProfile.analyzeModel;
+    body.apiKey = analyzeProfile.apiKey || undefined;
+    body.apiEndpoint = analyzeProfile.apiEndpoint || undefined;
+    body.profileId = analyzeProfile.id;
   }
 
-  // Fallback to high-craft visual engine
-  return generateIntelligentVisualAnalysis(imageSrc, userFocus);
+  const response = await authFetch('/api/gemini/analyze-style', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(data.error || `Yêu cầu phân tích thất bại (HTTP ${response.status}).`);
+  }
+  if (data.fallback) {
+    throw new Error(data.message || data.error || 'Provider không phân tích được ảnh.');
+  }
+  if (!data.success || !data.analysis) {
+    throw new Error(data.error || 'Provider không trả về kết quả phân tích.');
+  }
+
+  try {
+    return {
+      ...normalizeAnalysis(data.analysis),
+      analyzedAt: new Date().toLocaleTimeString('vi-VN', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      }),
+      sourceImagePreview: imageSrc,
+    };
+  } catch (error: any) {
+    throw new Error(`Không thể chuẩn hóa kết quả từ provider: ${error?.message || error}`);
+  }
 }

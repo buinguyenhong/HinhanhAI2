@@ -130,6 +130,7 @@ export const SettingsView: React.FC = () => {
   const [formRole, setFormRole] = useState<ApiProfileRole>('both');
   const [formEndpoint, setFormEndpoint] = useState('');
   const [formApiKey, setFormApiKey] = useState('');
+  const [formManaged, setFormManaged] = useState(false);
   const [formRenderModel, setFormRenderModel] = useState('');
   const [formAnalyzeModel, setFormAnalyzeModel] = useState('');
   const [formNotes, setFormNotes] = useState('');
@@ -168,6 +169,7 @@ export const SettingsView: React.FC = () => {
 
   const resetForm = () => {
     setEditingProfileId(null);
+    setFormManaged(false);
     setFormName('');
     setFormProvider('openai');
     setFormRole('both');
@@ -185,7 +187,8 @@ export const SettingsView: React.FC = () => {
   };
 
   const handleFetchModels = async () => {
-    if (formProvider !== 'gemini' && !formApiKey.trim()) {
+    const editingManaged = settings.apiProfiles.find((p) => p.id === editingProfileId)?.managed;
+    if (!editingManaged && formProvider !== 'gemini' && !formApiKey.trim()) {
       setModelsError('Nhập API Key trước khi tải danh sách model.');
       return;
     }
@@ -202,6 +205,7 @@ export const SettingsView: React.FC = () => {
           provider: formProvider,
           apiKey: formApiKey.trim() || undefined,
           apiEndpoint: formEndpoint.trim() || undefined,
+          profileId: editingManaged ? editingProfileId : undefined,
         }),
       });
       if (response.status === 401) {
@@ -287,6 +291,7 @@ export const SettingsView: React.FC = () => {
 
   const handleOpenEditModal = (profile: ApiProfile) => {
     setEditingProfileId(profile.id);
+    setFormManaged(Boolean(profile.managed));
     setFormName(profile.name);
     setFormProvider(profile.provider);
     setFormRole(profile.role);
@@ -319,7 +324,7 @@ export const SettingsView: React.FC = () => {
 
   const handleSaveProfileForm = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formName.trim()) return;
+    if (!formManaged && !formName.trim()) return;
 
     // Anthropic cannot have render role
     const finalRole: ApiProfileRole =
@@ -345,17 +350,25 @@ export const SettingsView: React.FC = () => {
     if (editingProfileId) {
       const updatedProfiles = settings.apiProfiles.map((p) => {
         if (p.id === editingProfileId) {
-          return {
-            ...p,
-            name: formName.trim(),
-            provider: formProvider,
-            role: finalRole,
-            apiEndpoint: formEndpoint.trim(),
-            apiKey: formApiKey.trim(),
-            renderModel: sanitizedRenderModel,
-            analyzeModel: sanitizedAnalyzeModel,
-            notes: formNotes.trim(),
-          };
+            if (p.managed) {
+              return {
+                ...p,
+                role: finalRole,
+                renderModel: sanitizedRenderModel,
+                analyzeModel: sanitizedAnalyzeModel,
+              };
+            }
+            return {
+              ...p,
+              name: formName.trim(),
+              provider: formProvider,
+              role: finalRole,
+              apiEndpoint: formEndpoint.trim(),
+              apiKey: formApiKey.trim(),
+              renderModel: sanitizedRenderModel,
+              analyzeModel: sanitizedAnalyzeModel,
+              notes: formNotes.trim(),
+            };
         }
         return p;
       });
@@ -591,7 +604,8 @@ export const SettingsView: React.FC = () => {
 
   // --- MODAL FORM TESTING HANDLERS ---
   const handleModalTestConnection = async () => {
-    if (formProvider !== 'gemini' && !formApiKey.trim()) {
+    const editingManaged = Boolean(settings.apiProfiles.find((p) => p.id === editingProfileId)?.managed);
+    if (!editingManaged && formProvider !== 'gemini' && !formApiKey.trim()) {
       setModalConnResult({
         status: 'error',
         message: 'Thiếu API Key. Vui lòng nhập khóa API trước khi kiểm tra kết nối.',
@@ -616,6 +630,7 @@ export const SettingsView: React.FC = () => {
           analyzeModel: formRole !== 'render' ? formAnalyzeModel.trim() || undefined : undefined,
           renderModel: formRole !== 'analyze' ? formRenderModel.trim() || undefined : undefined,
           role: formRole,
+          profileId: settings.apiProfiles.find((p) => p.id === editingProfileId)?.managed ? editingProfileId : undefined,
           testType: 'connection',
         }),
       });
@@ -653,6 +668,7 @@ export const SettingsView: React.FC = () => {
   };
 
   const handleModalTestRender = async () => {
+    const editingManaged = Boolean(settings.apiProfiles.find((p) => p.id === editingProfileId)?.managed);
     if (formProvider === 'anthropic') {
       setModalRenderResult({
         status: 'error',
@@ -661,7 +677,7 @@ export const SettingsView: React.FC = () => {
       return;
     }
 
-    if (formProvider !== 'gemini' && !formApiKey.trim()) {
+    if (!editingManaged && formProvider !== 'gemini' && !formApiKey.trim()) {
       setModalRenderResult({
         status: 'error',
         message: 'Thiếu API Key. Vui lòng nhập khóa API trước khi test model sinh ảnh.',
@@ -693,6 +709,7 @@ export const SettingsView: React.FC = () => {
           apiEndpoint: formEndpoint.trim() || undefined,
           renderModel: formRenderModel.trim() || undefined,
           role: formRole,
+          profileId: settings.apiProfiles.find((p) => p.id === editingProfileId)?.managed ? editingProfileId : undefined,
           testType: 'render',
         }),
       });
@@ -1114,12 +1131,11 @@ export const SettingsView: React.FC = () => {
                         </button>
                       )}
 
-                      <button
+                                    <button
                         type="button"
                         onClick={() => handleOpenEditModal(profile)}
-                        disabled={isManaged}
-                        title={isManaged ? 'Profile này cấu hình trong config/profiles.json (commit vào repo)' : 'Chỉnh sửa cấu hình'}
-                        className="p-1.5 border border-[#E2DDD5] dark:border-[#292925] text-[#6E6B64] dark:text-[#8C8B84] hover:text-[#1C1B18] dark:hover:text-[#E8E7E2] hover:border-[#CCC7BE] transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                        title={isManaged ? 'Chỉnh sửa vai trò và model (provider, endpoint, key env được quản lý trong repo)' : 'Chỉnh sửa cấu hình'}
+                        className="p-1.5 border border-[#E2DDD5] dark:border-[#292925] text-[#6E6B64] dark:text-[#8C8B84] hover:text-[#1C1B18] dark:hover:text-[#E8E7E2] hover:border-[#CCC7BE] transition-colors cursor-pointer"
                       >
                         <Edit2 size={13} />
                       </button>
@@ -1557,7 +1573,15 @@ export const SettingsView: React.FC = () => {
             </div>
 
             <form onSubmit={handleSaveProfileForm} className="space-y-4 text-xs">
-              <div className="space-y-1.5">
+              {(() => {
+                const editingManagedProfile = settings.apiProfiles.find((p) => p.id === editingProfileId)?.managed;
+                return editingManagedProfile ? (
+                  <div className="p-3 border border-[#3B82F6]/30 bg-[#3B82F6]/5 text-[10px] font-mono text-[#1D4ED8] dark:text-[#93C5FD]">
+                    Provider, endpoint và API key env được quản lý trong repo. Tại đây bạn có thể đổi role và chọn model Render/Analyze.
+                  </div>
+                ) : null;
+              })()}
+              {!settings.apiProfiles.find((p) => p.id === editingProfileId)?.managed && <div className="space-y-1.5">
                 <label className="block text-[10px] uppercase tracking-wider text-[#6E6B64] dark:text-[#8C8B84] font-medium">
                   Tên hiển thị (Profile Name) *
                 </label>
@@ -1569,9 +1593,9 @@ export const SettingsView: React.FC = () => {
                   placeholder="Ví dụ: My OpenAI Key, Personal Anthropic..."
                   className="w-full bg-[#FFFFFF] dark:bg-[#0E0E0D] border border-[#E2DDD5] dark:border-[#292925] p-2.5 text-xs text-[#1C1B18] dark:text-[#E8E7E2] focus:outline-none focus:border-[#1C1B18] dark:focus:border-[#5E5D57] transition-colors"
                 />
-              </div>
+              </div>}
 
-              <div className="space-y-1.5">
+              {!settings.apiProfiles.find((p) => p.id === editingProfileId)?.managed && <div className="space-y-1.5">
                 <label className="block text-[10px] uppercase tracking-wider text-[#6E6B64] dark:text-[#8C8B84] font-medium">
                   Loại nhà cung cấp (Provider) *
                 </label>
@@ -1584,7 +1608,7 @@ export const SettingsView: React.FC = () => {
                   <option value="openai">OpenAI / OpenAI-compatible</option>
                   <option value="anthropic">Anthropic (chỉ phân tích ảnh)</option>
                 </select>
-              </div>
+              </div>}
 
               <div className="space-y-1.5">
                 <label className="block text-[10px] uppercase tracking-wider text-[#6E6B64] dark:text-[#8C8B84] font-medium">
@@ -1617,7 +1641,7 @@ export const SettingsView: React.FC = () => {
                 </p>
               </div>
 
-              <div className="space-y-1.5">
+              {!settings.apiProfiles.find((p) => p.id === editingProfileId)?.managed && <div className="space-y-1.5">
                 <label className="block text-[10px] uppercase tracking-wider text-[#6E6B64] dark:text-[#8C8B84] font-medium">
                   API Endpoint URL
                 </label>
@@ -1633,9 +1657,9 @@ export const SettingsView: React.FC = () => {
                     Nhập endpoint OpenAI-compatible (VD: https://1endpoint.dev/api/v1 hoặc https://1endpoint.dev, OpenRouter, Together...). Hệ thống tự nhận diện các đường dẫn /api/v1 hoặc /v1.
                   </p>
                 )}
-              </div>
+              </div>}
 
-              <div className="space-y-1.5">
+              {!settings.apiProfiles.find((p) => p.id === editingProfileId)?.managed && <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <label className="text-[10px] uppercase tracking-wider text-[#6E6B64] dark:text-[#8C8B84] font-medium">
                     API Key / Secret Token
@@ -1655,7 +1679,7 @@ export const SettingsView: React.FC = () => {
                   placeholder={formProvider === 'gemini' ? 'Để trống nếu muốn dùng GEMINI_API_KEY của server' : 'sk-... / API key...'}
                   className="w-full bg-[#FFFFFF] dark:bg-[#0E0E0D] border border-[#E2DDD5] dark:border-[#292925] p-2.5 text-xs text-[#1C1B18] dark:text-[#E8E7E2] font-mono focus:outline-none focus:border-[#1C1B18] dark:focus:border-[#5E5D57] transition-colors"
                 />
-              </div>
+              </div>}
 
               {/* Tự động lấy danh sách model từ provider để gợi ý (autocomplete) */}
               <div className="space-y-1.5">

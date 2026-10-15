@@ -992,11 +992,11 @@ app.post('/api/gemini/analyze-style', aiLimiter, async (req, res) => {
       if (provider === 'gemini') effectiveKey = process.env.GEMINI_API_KEY || '';
     }
     if (!effectiveKey) {
-      return res.status(200).json({
-        fallback: true,
-        message: managed
-          ? `Profile '${managed.name || managed.id}' chưa có API Key. Hãy set biến môi trường ${managed.keyEnv || '(keyEnv)'}. Sử dụng visual engine tích hợp.`
-          : `Chưa cấu hình API Key cho provider '${provider}'. Sử dụng visual engine tích hợp.`,
+      return res.status(400).json({
+        success: false,
+        error: managed
+          ? `Profile '${managed.name || managed.id}' chưa có API Key. Hãy set biến môi trường ${managed.keyEnv || '(keyEnv)'}.`
+          : `Chưa cấu hình API Key cho provider '${provider}'.`,
       });
     }
 
@@ -1041,12 +1041,12 @@ app.post('/api/gemini/analyze-style', aiLimiter, async (req, res) => {
       }
     } catch (providerErr: any) {
       const isAbort = providerErr?.name === 'AbortError' || /aborted|timeout/i.test(providerErr?.message || '');
-      console.warn(`Analyze via ${provider} failed${isAbort ? ' (timeout)' : ''}, fallback to visual engine:`, providerErr?.message);
-      return res.status(200).json({
-        fallback: true,
-        message: isAbort
-          ? `Provider '${provider}' phản hồi quá ${ANALYZE_TIMEOUT_MS / 1000}s. Đã chuyển sang visual engine.`
-          : providerErr?.message || `Phân tích qua ${provider} thất bại. Đã chuyển sang visual engine.`,
+      console.warn(`Analyze via ${provider} failed${isAbort ? ' (timeout)' : ''}:`, providerErr?.message);
+      return res.status(isAbort ? 504 : 502).json({
+        success: false,
+        error: isAbort
+          ? `Provider '${provider}' phản hồi quá ${ANALYZE_TIMEOUT_MS / 1000}s.`
+          : providerErr?.message || `Phân tích qua ${provider} thất bại.`,
       });
     }
 
@@ -1057,8 +1057,8 @@ app.post('/api/gemini/analyze-style', aiLimiter, async (req, res) => {
     });
   } catch (error: any) {
     console.error('Error in analyze-style handler:', error);
-    return res.status(200).json({
-      fallback: true,
+    return res.status(500).json({
+      success: false,
       error: error?.message || 'Failed to analyze image style',
     });
   }
@@ -1846,7 +1846,7 @@ app.post('/api/test-profile', apiLimiter, async (req, res) => {
       apiEndpoint = managed.apiEndpoint || apiEndpoint;
       renderModel = renderModel || managed.renderModel;
       analyzeModel = analyzeModel || managed.analyzeModel;
-      role = managed.role || role;
+      role = role || managed.role;
     }
     const start = Date.now();
 

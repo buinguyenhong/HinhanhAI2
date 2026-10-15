@@ -64,7 +64,7 @@ AI Image Studio (tên gọi khác: **HinhanhAI**) là một công cụ chỉnh s
 
 ### 4.3. Luồng backend (đã triển khai)
 - `POST /api/generate-image`: nhận `provider` (`gemini`|`openai`|`anthropic`), `model` (renderModel), `apiKey`, `apiEndpoint`; route theo provider; Anthropic → lỗi 400 "không hỗ trợ sinh ảnh"; **không còn fallback Pollinations** — nếu tất cả variant fail → trả 500 với thông báo rõ.
-- `POST /api/gemini/analyze-style`: nhận `provider`, `model` (analyzeModel), `apiKey`, `apiEndpoint`; tách 3 hàm `analyzeWithGemini`/`OpenAI`/`Anthropic`; Gemini dùng `responseSchema` trực tiếp từ `ANALYSIS_RESPONSE_SCHEMA`, OpenAI/Anthropic ép JSON qua system prompt; trả `{ fallback: true }` nếu lỗi để client dùng visual engine nội bộ.
+- `POST /api/gemini/analyze-style`: nhận `provider`, `model` (analyzeModel), `apiKey`, `apiEndpoint`; tách 3 hàm `analyzeWithGemini`/`OpenAI`/`Anthropic`; Gemini dùng `responseSchema` trực tiếp từ `ANALYSIS_RESPONSE_SCHEMA`, OpenAI/Anthropic ép JSON qua system prompt; khi provider lỗi, trả lỗi để client hiển thị, không thay bằng phân tích mẫu giả lập.
 
 ## 5. Cấu hình / Biến môi trường
 Xem `.env.example`:

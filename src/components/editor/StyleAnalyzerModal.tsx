@@ -84,6 +84,7 @@ export const StyleAnalyzerModal: React.FC<StyleAnalyzerModalProps> = ({
   const [currentImage, setCurrentImage] = useState<string | null>(initialImage);
   const [currentFile, setCurrentFile] = useState<File | null>(initialFile || null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [analysisResult, setAnalysisResult] = useState<StyleAnalysisResult | null>(null);
   const [activeTab, setActiveTab] = useState<'all' | 'background' | 'lighting' | 'camera' | 'colors' | 'custom_prompt'>('all');
   const [copiedField, setCopiedField] = useState<string | null>(null);
@@ -129,12 +130,15 @@ export const StyleAnalyzerModal: React.FC<StyleAnalyzerModalProps> = ({
 
   const runAnalysis = async (imgSrc: string, file: File | null, focusReq?: string) => {
     setIsAnalyzing(true);
+    setAnalysisError(null);
+    setAnalysisResult(null);
     try {
       const analyzeProfile = getAnalyzeProfile(loadAppSettings());
       const result = await analyzeImageStyle(imgSrc, file, focusReq || customFocus, analyzeProfile);
       setAnalysisResult(result);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to analyze image style:', err);
+      setAnalysisError(err?.message || 'Không thể phân tích ảnh. Kiểm tra provider, API key và model Analyze.');
     } finally {
       setIsAnalyzing(false);
     }
@@ -745,6 +749,14 @@ export const StyleAnalyzerModal: React.FC<StyleAnalyzerModalProps> = ({
                 <p className="text-[11px] text-[#6E6B64] dark:text-[#8C8B84]">
                   Nhận diện chi tiết: lâu đài cổ, tường xi măng, đèn cổ điển, chất liệu bề mặt và bố cục
                 </p>
+              </div>
+            )}
+
+            {!isAnalyzing && analysisError && (
+              <div className="m-4 p-4 border border-red-300 dark:border-red-900/60 bg-red-50 dark:bg-red-950/20 text-red-800 dark:text-red-300 space-y-2">
+                <p className="text-xs font-semibold">AI không phân tích được ảnh</p>
+                <p className="text-[11px] break-words">{analysisError}</p>
+                <p className="text-[10px] opacity-80">Kiểm tra API key trên Render và chọn model có hỗ trợ vision trong profile Analyze.</p>
               </div>
             )}
 

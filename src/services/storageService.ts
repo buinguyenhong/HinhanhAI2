@@ -112,6 +112,7 @@ export function mergeProfiles(stored: ApiProfile[]): ApiProfile[] {
     return local
       ? {
           ...profile,
+          role: local.role || profile.role,
           renderModel: local.renderModel || profile.renderModel,
           analyzeModel: local.analyzeModel || profile.analyzeModel,
         }
@@ -232,7 +233,7 @@ export const writeSettingsLocally = (settings: AppSettings): void => {
     // Chỉ lưu model được chọn cho managed profile; config/provider/key luôn lấy từ repo/env.
     const managedOverrides = settings.apiProfiles
       .filter((p) => p.managed)
-      .map((p) => ({ id: p.id, renderModel: p.renderModel, analyzeModel: p.analyzeModel }));
+      .map((p) => ({ id: p.id, role: p.role, renderModel: p.renderModel, analyzeModel: p.analyzeModel }));
     const customProfiles = settings.apiProfiles.filter((p) => !p.managed);
     const persisted: AppSettings = {
       ...settings,
