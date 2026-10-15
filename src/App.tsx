@@ -129,7 +129,10 @@ function AppContent() {
 
       {/* Main Studio Viewport */}
       <main className="flex-1 overflow-auto px-6 sm:px-10 py-8 w-full max-w-[1680px] mx-auto">
-        {activeTab === 'editor' && <EditorView />}
+        {/* Editor luôn được mount để giữ nguyên ảnh gốc, prompt và kết quả khi đổi tab. */}
+        <div className={activeTab === 'editor' ? 'block' : 'hidden'}>
+          <EditorView />
+        </div>
         {activeTab === 'history' && <HistoryView />}
         {activeTab === 'dashboard' && <DashboardView />}
         {activeTab === 'settings' && <SettingsView />}

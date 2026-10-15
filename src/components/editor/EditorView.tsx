@@ -17,10 +17,19 @@ import { loadAppSettings, getRenderProfile, ApiProfile } from '../../services/st
 import { generateImages } from '../../services/imageGenerationService';
 import { saveGeneratedToHistory } from '../../services/historyService';
 import { uploadImageToDrive } from '../../services/googleDriveService';
+import { SETTINGS_SAVED_EVENT } from '../../services/syncEvents';
 
 export const EditorView: React.FC = () => {
   const [appSettings, setAppSettings] = useState(loadAppSettings);
   const activeRenderProfile = getRenderProfile(appSettings);
+
+  // Nạp lại settings khi có thay đổi (đổi provider/model ở tab Settings, hoặc sync từ server)
+  // để Editor không hiển thị profile cũ dù component được giữ mount.
+  useEffect(() => {
+    const reload = () => setAppSettings(loadAppSettings());
+    window.addEventListener(SETTINGS_SAVED_EVENT, reload);
+    return () => window.removeEventListener(SETTINGS_SAVED_EVENT, reload);
+  }, []);
 
   // Inputs
   const [sourceImage, setSourceImage] = useState<string | null>(null);
@@ -41,6 +50,15 @@ export const EditorView: React.FC = () => {
     model: activeRenderProfile.renderModel || 'gemini-2.5-flash-image',
     cfgScale: 7.0,
   });
+
+  // Đồng bộ model hiển thị theo profile render đang chọn (khi profile đổi từ tab Settings).
+  useEffect(() => {
+    setSettings((prev) =>
+      prev.model === activeRenderProfile.renderModel
+        ? prev
+        : { ...prev, model: activeRenderProfile.renderModel }
+    );
+  }, [activeRenderProfile.id, activeRenderProfile.renderModel]);
 
   // State
   const [genState, setGenState] = useState<GenState>('idle');
