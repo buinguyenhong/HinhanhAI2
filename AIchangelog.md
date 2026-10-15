@@ -8,10 +8,11 @@
 
 | # | Commit | Tóm tắt |
 |---|---|---|
-| 21 | `HEAD` | **fix([OI] edits): dùng nhất quán một tên field ảnh** — trước đây khi có cả ảnh gốc lẫn ảnh mẫu thì gửi lẫn `image` và `image[]` khiến 1endpoint trả 400 "Use one file field name consistently"; nay dùng `image` (1 ảnh) hoặc `image[]` (nhiều ảnh) thống nhất, ảnh gốc trước ảnh mẫu. |
+| 22 | `HEAD` | **fix(editor): giữ nguyên workspace khi đổi tab** — `EditorView` luôn được mount (ẩn bằng CSS thay vì unmount) nên ảnh gốc, prompt và kết quả không bị mất khi chuyển tab; EditorView nạp lại settings khi có `SETTINGS_SAVED_EVENT` và đồng bộ model hiển thị theo profile render đang chọn. |
+| 21 | `7f422bc` | **fix([OI] edits): dùng nhất quán một tên field ảnh** — trước đây khi có cả ảnh gốc lẫn ảnh mẫu thì gửi lẫn `image` và `image[]` khiến 1endpoint trả 400 "Use one file field name consistently"; nay dùng `image` (1 ảnh) hoặc `image[]` (nhiều ảnh) thống nhất, ảnh gốc trước ảnh mẫu. |
 | 20 | `15402db` | **fix(image-ref): nhận diện rộng nhóm model ảnh thay vì chỉ gpt-image-2** — thay guard cứng `gpt-image-2` bằng `looksLikeImageModel()` (gpt-image, dall-e, imagen, nano-banana, flux, stable-diffusion, seedream, qwen-image, ideogram, grok-image, gemini *-image, ...); sửa lỗi chặn oan `nano-banana-2-edit` và các model edit khác khi dùng ảnh gốc; model text-only vẫn bị chặn kèm gợi ý. |
-| 19 | `fa10818` | **fix(image-reference): gửi ảnh chủ thể thật vào model và không hứa face lock 100%** — Imagen 3 Capability gọi `editImage` với `SubjectReferenceImage` + ảnh style; Imagen text-only trả lỗi nếu bật subject lock; OpenAI-compatible gpt-image-2 dùng multipart `/images/edits` (ảnh gốc + ảnh style), gỡ JSON retry text-only; kiểm tra model/provider hỗ trợ trước khi gọi; default Gemini chuyển sang `imagen-3.0-capability-001`; UI đổi copy phần trăm thành prompt emphasis chứ không guarantee, toggle cập nhật cả preserveStructure/preserveFace. |
-| 18 | `ff9e574` | **fix(analyze, profiles): bỏ phân tích giả lập, cho chỉnh role + model profile managed** | — `analyzeImageStyle` giờ throw lỗi provider/API/model thay vì dùng visual heuristic template; StyleAnalyzerModal hiển thị lỗi ngay, server trả HTTP 4xx/5xx; managed profiles có thể chỉnh role Render/Analyze/Both và riêng renderModel/analyzeModel trong Settings (provider/endpoint/keyEnv vẫn cố định theo repo); override role/models lưu local + cloud sync. |
+| 19 | `fa10818` | **fix(image-reference): gửi ảnh chủ thể thật vào model và không hứa face lock 100%** — Imagen 3 Capability gọi `editImage` với `SubjectReferenceImage` + ảnh style; Imagen text-only trả lỗi nếu bật subject lock; OpenAI-compatible gpt-image-2 dùng multipart `/images/edits` (ảnh gốc + ảnh style), gỡ JSON retry text-only; kiểm tra model/provider hỗ trợ trước khi gọi; default Gemini render chuyển sang `gemini-2.5-flash-image` (nhận ảnh gốc); UI đổi copy phần trăm thành prompt emphasis chứ không guarantee, toggle cập nhật cả preserveStructure/preserveFace. |
+| 18 | `ff9e574` | **fix(analyze, profiles): bỏ phân tích giả lập, cho chỉnh role + model profile managed** — `analyzeImageStyle` giờ throw lỗi provider/API/model thay vì dùng visual heuristic template; StyleAnalyzerModal hiển thị lỗi ngay, server trả HTTP 4xx/5xx; managed profiles có thể chỉnh role Render/Analyze/Both và riêng renderModel/analyzeModel trong Settings (provider/endpoint/keyEnv vẫn cố định theo repo); override role/models lưu local + cloud sync. |
 | 17 | `8a55ab9` | **feat(models): thêm 1endpoint.dev + tự lấy danh sách model** — thêm managed profile `1endpoint` (`https://1endpoint.dev/api/v1`, key env `ONEENDPOINT_API_KEY`, defaults `gpt-image-2`/`gpt-4o`); endpoint auth-only `/api/list-models` lấy models qua Gemini SDK, OpenAI-compatible `/models` candidate paths, hoặc Anthropic `/v1/models`; Settings có nút tải danh sách trong profile và form thêm/sửa, trả model thành nút chọn riêng cho render/analyze; đã xác minh 1endpoint trả danh sách 31 models. |
 | 16 | `26fa16e` | **feat(config): provider profiles lưu trong repo, API key qua env** — thêm `config/profiles.json` (không chứa key) làm nguồn cấu hình provider; cả client (Vite) lẫn server (esbuild) đọc chung file; mỗi profile có `keyEnv` trỏ tên biến môi trường; server resolve key từ env theo `profileId`, bỏ qua key client gửi; profile managed luôn hiện + không sửa/xóa trong UI (badge CONFIG); profile người dùng tự thêm vẫn lưu localStorage và được ghép thêm. |
 | 15 | `b279dd1` | **fix(auth): session dài hạn + tự phát hiện hết hạn, tự sync lại khi quay lại tab** — client tự decode `exp` JWT (`isTokenExpired`) để `isUserAuthenticated()` không còn "zombie session"; thêm `authFetch()` gắn Bearer + bắt 401 tập trung → tự đưa về màn hình Login (áp dụng cho sync, generate, analyze); `App.tsx` tự `performInitialSync()` khi tab/cửa sổ active trở lại; server `SESSION_TTL` (mặc định 30d thay cho 12h); xóa `firebase-applet-config.json` (dead code). |
@@ -52,8 +53,12 @@
   notes?: string;
   isCustom?: boolean;
   createdAt: string;
+  managed?: boolean;        // profile định nghĩa trong config/profiles.json
+  keyEnv?: string;          // tên biến môi trường chứa key (server resolve)
 }
 ```
+
+**Nguồn profile:** `config/profiles.json` (commit vào repo, KHÔNG chứa key) → `MANAGED_PROFILES` trong storageService. Managed profile luôn xuất hiện, ghi đè theo `id`, nhưng vẫn cho sửa `role`/`renderModel`/`analyzeModel` trong UI; provider/endpoint/keyEnv cố định theo repo. Profile người dùng tự thêm lưu localStorage.
 
 **`AppSettings` shape:**
 ```ts
@@ -90,9 +95,13 @@
 |---|---|---|
 | `/api/health` | GET | Public. |
 | `/api/login` | POST | JWT (TTL qua `SESSION_TTL`, mặc định 30 ngày) + cookie httpOnly. |
-| `/api/gemini/analyze-style` | POST | Phân tích ảnh mẫu (multi-provider + vision). |
-| `/api/generate-image` | POST | Sinh ảnh (multi-provider, không Pollinations). |
+| `/api/gemini/analyze-style` | POST | Phân tích ảnh mẫu (multi-provider + vision); lỗi trả 4xx/5xx, không fallback giả lập. |
+| `/api/generate-image` | POST | Sinh/sửa ảnh (multi-provider, không Pollinations); gửi ảnh gốc qua edit/ref khi model hỗ trợ. |
 | `/api/test-profile` | POST | Connectivity check thật: text probe (analyze) + image probe (render). |
+| `/api/list-models` | POST | Lấy danh sách model từ provider (Gemini SDK / [OI] `/models` / Anthropic `/v1/models`). |
+| `/api/sync/state` | GET | Lấy settings + history đã đồng bộ (scoped theo session). |
+| `/api/sync/settings` | PUT | Lưu AppSettings lên server (last-write-wins theo updatedAt). |
+| `/api/sync/history` | PUT | Lưu lịch sử (tối đa 100 mục) lên server. |
 
 ### 0A.4. Helper quan trọng trong server.ts
 
@@ -102,13 +111,18 @@
 - `normalizeAnalysisViaGemini(raw, apiKey)` — gọi Gemini 3.1 Flash-Lite với `responseSchema` chặt để map raw payload → schema.
 - `looksLikeCompliantAnalysis(payload)` — spot-check 13 field bắt buộc + nested shapes.
 - `extractUpstreamErrorMessage(status, rawText)` — rút message người đọc được từ proxy envelope.
-- `generateWith[OI](p)` — thử lần lượt `/images/generations`, `/images`, `/v1/images/generations`. Nếu cả 3 đều 404 → message "endpoint không hỗ trợ sinh ảnh".
+- `looksLikeImageModel(model)` — nhận diện họ model ảnh (gpt-image, dall-e, imagen, nano-banana, flux, stable-diffusion, seedream, qwen-image, ideogram, grok-image, gemini *-image...). Dùng để chặn model text-only khi có ảnh gốc.
+- `generateWith[OI](p)` — không có ảnh input: thử `/images/generations`, `/images`; có ảnh input: thử `/images/edits` (multipart, field `image` nếu 1 ảnh hoặc `image[]` nếu nhiều, KHÔNG trộn tên field).
+- `generateWithGemini(p)` — Imagen 3 Capability dùng `editImage` + `SubjectReferenceImage`/`StyleReferenceImage`; model Gemini `*-image` dùng `generateContent` với `responseModalities:['IMAGE']`; Imagen text-only không nhận source image.
+- `resolveManagedKey(profile)` — lấy key từ `process.env[profile.keyEnv]` cho profile managed.
+- `mapAspectRatioToStandard(ratio)` — chuẩn hóa tỷ lệ khung hình.
 
 ### 0A.5. Env vars
 
 | Var | Default | Mục đích |
 |---|---|---|
-| `GEMINI_API_KEY` | — | Gemini SDK key. |
+| `GEMINI_API_KEY` | — | Gemini SDK key (keyEnv của profile `gemini-default`). |
+| `ONEENDPOINT_API_KEY` | — | Key cho profile `1endpoint` (keyEnv trong config). |
 | `APP_PASSWORD` | `admin` (dev) | Mật khẩu login. Production bắt buộc. |
 | `JWT_SECRET` | dev value | Ký JWT. Production bắt buộc. |
 | `SESSION_TTL` | `30d` | Thời hạn phiên (s/m/h/d). |
@@ -116,8 +130,10 @@
 | `OPENAI_ALLOWED_DOMAINS` | (none — legacy, không dùng) | Đã bỏ SSRF guard. |
 | `ANALYZE_NORMALIZER_ENABLED` | `true` | Bật/tắt server-side LLM normalizer. |
 | `ANALYZE_TIMEOUT_MS` | 60000 | Timeout analyze. |
-| `GENERATE_TIMEOUT_MS` | 90000 | Timeout generate. |
-| `RATE_LIMIT_WINDOW_MS` / `RATE_LIMIT_MAX` / `AI_RATE_LIMIT_MAX` | 900000 / 150 / 20 | Rate-limit config. |
+| `GENERATE_TIMEOUT_MS` | 180000 | Timeout generate. |
+| `SYNC_DATA_FILE` | `./data/sync-store.json` | File JSON đồng bộ settings + history (Render cần Persistent Disk nếu muốn bền). |
+| `VITE_GOOGLE_CLIENT_ID` | — | Google OAuth Client ID cho Drive (client-side). |
+| `RATE_LIMIT_WINDOW_MS` / `RATE_LIMIT_MAX` / `AI_RATE_LIMIT_MAX` | 900000 / 150 / 120 | Rate-limit config. |
 | `PORT` | 3000 | Server port. |
 
 ### 0A.6. Client-side normalization (styleAnalysisService.ts)
@@ -131,14 +147,17 @@
 
 | File | Vai trò |
 |---|---|
-| `SettingsView.tsx` | Multi-profile manager, 2 engine banner tách riêng, form provider mới (gemini/openai/anthropic, role, renderModel, analyzeModel), Test button thật. |
-| `OutputSettings.tsx` | Render Engine selector, lọc profile `role !== 'analyze'`. |
-| `EditorView.tsx` | Dùng `getRenderProfile`; badge "Render Engine". |
-| `StyleAnalyzerModal.tsx` | Truyền `getAnalyzeProfile(loadAppSettings())` vào `analyzeImageStyle`. |
+| `SettingsView.tsx` | Multi-profile manager, 2 engine banner tách riêng, form provider mới (gemini/openai/anthropic, role, renderModel, analyzeModel), Test button thật, nút tải danh sách model (`/api/list-models`), profile managed sửa được role/model (badge CONFIG). |
+| `OutputSettings.tsx` | Render Engine selector, lọc profile `role !== 'analyze'`; toggle tham chiếu chủ thể cập nhật cả `preserveStructure`+`preserveFace`. |
+| `EditorView.tsx` | Dùng `getRenderProfile`; badge "Render Engine"; lắng nghe `SETTINGS_SAVED_EVENT` để nạp lại settings. |
+| `App.tsx` | `EditorView` luôn mount (ẩn bằng CSS) để không mất state khi đổi tab; tự `performInitialSync()` khi tab active trở lại. |
+| `StyleAnalyzerModal.tsx` | Truyền `getAnalyzeProfile(loadAppSettings())`; hiển thị lỗi phân tích rõ ràng (không mock). |
 | `ErrorBoundary.tsx` | Hiện error.message + nút "Thử lại" (không reload state). |
-| `storageService.ts` | Schema v4 (multi-provider + role). |
-| `imageGenerationService.ts` | Truyền `renderModel` + `apiKey` + `apiEndpoint`. |
-| `styleAnalysisService.ts` | `analyzeProfile` param; client-side normalizer. |
+| `storageService.ts` | Schema v4 (multi-provider + role); ghép `MANAGED_PROFILES` từ `config/profiles.json`; `mergeProfiles`/`writeSettingsLocally` giữ override role/model. |
+| `imageGenerationService.ts` | Truyền `renderModel` + `apiKey` + `apiEndpoint` + `profileId`; `authFetch`. |
+| `styleAnalysisService.ts` | `analyzeProfile` param; client-side normalizer; throw lỗi thay vì fallback giả lập. |
+| `authService.ts` | `isTokenExpired` (decode exp JWT) + `authFetch` (gắn Bearer + bắt 401 tập trung). |
+| `syncService.ts` | Đồng bộ settings/history với server qua `authFetch`; debounce + merge history theo id. |
 
 ### 0A.8. Encoding rule
 
@@ -179,6 +198,20 @@ User hỏi dùng Unsplash làm provider sinh ảnh. Đã tra docs (https://unspl
 
 **Quyết định:** Không tích hợp. Nếu sau này cần stock photo → làm endpoint riêng `/api/unsplash-search` (sandbox), không gộp vào generate-image flow.
 
+### 0A.12. Chọn model Render / Analyze (kinh nghiệm thực tế)
+
+Trong danh sách model của 1endpoint, phần lớn là **model text/chat** (deepseek, glm, gpt-5.x/6, grok, kimi, mimo, minimax, qwen text, embedding) — chọn làm render sẽ không ra ảnh. Chỉ dùng **họ model ảnh**:
+
+| Mục đích | Model gợi ý |
+|---|---|
+| Render có ảnh gốc (giữ chủ thể) | `nano-banana-2-edit`, `gemini-3.1-flash-image-edit`, `gemini-3-pro-image-edit` |
+| Render text-to-image | `nano-banana-2`, `gemini-3.1-flash-image`, `gemini-3-pro-image` |
+| Analyze (đọc ảnh mẫu, cần vision) | `gemini-3.8-flash` hoặc các model `*-image` |
+
+- Khuyến nghị mặc định: **`nano-banana-2-edit`** cho render có ảnh gốc.
+- Độ giống gương mặt **phụ thuộc model**, không model phổ thông nào đảm bảo 100%. Muốn khóa mặt tuyệt đối cần giải pháp chuyên dụng (face-swap / ControlNet như InstantID, PuLID) — chưa tích hợp.
+- Gemini mặc định trong `config/profiles.json`: render `gemini-2.5-flash-image`, analyze `gemini-3.7-flash`.
+
 ---
 
 ## 0B. COMMIT ĐẦU TIÊN — REFACTOR MULTI-PROVIDER (commit `089e50b`)
@@ -186,9 +219,9 @@ User hỏi dùng Unsplash làm provider sinh ảnh. Đã tra docs (https://unspl
 **Commit sẽ tới:** `refactor: complete multi-provider (gemini/openai/anthropic), drop Pollinations fallback, fix encoding`.
 
 
-## 0. HOÀN TẤT REFACTOR MULTI-PROVIDER (mới nhất — local, chờ commit/push)
+## 0. REFACTOR MULTI-PROVIDER (ĐÃ HOÀN TẤT — commit `089e50b`, đã push)
 
-**Commit sẽ tới:** `refactor: complete multi-provider (gemini/openai/anthropic), drop Pollinations fallback, fix encoding`.
+> ⚠️ Mục này là lịch sử. Trạng thái mới nhất xem mục 0 (bảng commit) và 0A ở trên.
 
 ### 0.1. Phạm vi thay đổi
 
@@ -214,9 +247,9 @@ User hỏi dùng Unsplash làm provider sinh ảnh. Đã tra docs (https://unspl
 - `npm run lint` → pass.
 - `npm run build` → pass (vite + esbuild server thành công).
 
-### 0.3. Chưa commit/push
-- Sẽ commit gộp với bản sửa encoding (ghi đè commit mojibake `089b5cf` trên remote).
-- Sau push, Render sẽ tự build lại.
+### 0.3. Trạng thái
+- ✅ Đã commit (`089e50b`) và push; Render đã build bản mới.
+- ✅ Bản sửa encoding đã gộp, ghi đè commit mojibake `089b5cf`.
 
 ---
 
